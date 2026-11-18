@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Mood Garden</title>
+  <meta name="description" content="A living digital garden that responds to your face and hands. Camera is processed locally in your browser." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Inter:wght@300;400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three.module.min.js" } }
+  </script>
+</head>
+<body>
+  <canvas id="scene" aria-label="Mood Garden scene"></canvas>
+  <div class="veil" aria-hidden="true"></div>
+  <div class="flash" aria-hidden="true"></div>
+
+  <!-- Landing -->
+  <section id="landing" class="landing">
+    <div class="landing-inner">
+      <h1 class="title">MOOD GARDEN</h1>
+      <p class="subtitle">Your face changes the weather.</p>
+      <button id="enter" class="enter">Enter the garden</button>
+      <p id="landing-note" class="landing-note">
+        The garden asks to use your camera. Everything is processed on this device.
+        Nothing is recorded, stored or uploaded.
+      </p>
+      <button id="no-camera" class="text-link" hidden>Wander without a camera</button>
+    </div>
+  </section>
+
+  <!-- Discreet HUD -->
+  <div id="hud" class="hud" hidden>
+    <div id="status" class="status" data-state="off" role="status" aria-live="polite">
+      <span class="dot"></span><span class="status-text">camera off</span>
+      <span id="hands-status" class="hands-status"></span>
+    </div>
+
+    <nav class="controls" aria-label="Garden controls">
+      <button id="btn-camera" class="ctl" title="Turn camera off" aria-label="Toggle camera">
+        <svg viewBox="0 0 24 24"><path d="M4 7.5h3l1.6-2h6.8l1.6 2h3v11H4z"/><circle cx="12" cy="13" r="3.4"/><path class="slash" d="M3 3l18 18"/></svg>
+      </button>
+      <button id="btn-audio" class="ctl" title="Ambient sound" aria-label="Toggle ambient sound" aria-pressed="false">
+        <svg viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path class="wave" d="M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a7.8 7.8 0 0 1 0 11"/><path class="slash" d="M15.5 9.5l5 5M20.5 9.5l-5 5"/></svg>
+      </button>
+      <button id="btn-reset" class="ctl" title="Reset the garden" aria-label="Reset the garden">
+        <svg viewBox="0 0 24 24"><path d="M5 12a7 7 0 1 0 2.1-5"/><path d="M5 4.5v3.5h3.5"/></svg>
+      </button>
+      <button id="btn-guide" class="ctl" title="How to play" aria-label="Toggle interaction guide" aria-pressed="true">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9.8 9.6a2.3 2.3 0 1 1 3.2 2.1c-.7.3-1 .8-1 1.5v.6"/><circle cx="12" cy="16.6" r=".6" fill="currentColor"/></svg>
+      </button>
+    </nav>
+
+    <aside id="guide" class="guide" aria-label="Interaction guide">
+      <h2>Face</h2>
+      <ul>
+        <li><b>Smile</b> flowers open, warm light. Bigger smile, fuller bloom.</li>
+        <li><b>Blink</b> a drift of petals falls.</li>
+        <li><b>Raise eyebrows</b> the wind picks up.</li>
+        <li><b>Open mouth</b> a pulse ripples outward.</li>
+        <li><b>Tilt head</b> the world tilts with you.</li>
+        <li><b>Furrow brows</b> (angry) a storm rolls in.</li>
+        <li><b>Frown</b> (sad) rain falls, plants droop.</li>
+        <li><b>Relax</b> the garden settles back to rest.</li>
+      </ul>
+      <h2>Hands</h2>
+      <ul>
+        <li><b>Open palm</b> draws light and petals to you.</li>
+        <li><b>Fist</b> pushes them away.</li>
+        <li><b>Pinch</b> plants a new flower.</li>
+        <li><b>Wave</b> sends a gust of wind.</li>
+      </ul>
+      <button id="guide-hide" class="text-link small">hide</button>
+    </aside>
+
+    <pre id="debug" class="debug" hidden></pre>
+  </div>
+
+  <div id="toast" class="toast" role="alert" hidden></div>
+
+  <video id="cam" playsinline muted autoplay></video>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
