@@ -2,7 +2,7 @@
 
 **Your face changes the weather.**
 
-Mood Garden is a living, floating miniature garden that reacts to your face and hands in real time through your webcam. Smile and the flowers open, blink and petals fall, frown and it starts to rain. Your face is an invisible controller: the camera feed is never shown and never leaves your device.
+Mood Garden is a living meadow that stretches to the horizon and reacts to your face and hands in real time through your webcam. Smile and the flowers open, blink and petals fall, frown and it starts to rain. A small mirrored view in the corner shows your face with its tracked mesh and hand skeletons, so you can see what the garden sees. The camera feed never leaves your device.
 
 Built with plain HTML, CSS and JavaScript, [Three.js](https://threejs.org/) for rendering, and [MediaPipe Face Landmarker + Hand Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker) for tracking. There is no build step.
 
@@ -42,7 +42,7 @@ Everything the app needs (Three.js, the MediaPipe WASM runtime, and both `.task`
 | **Blink** | A soft drift of petals falls from the trees and sky (once per blink, never repeats while your eyes stay closed) |
 | **Raise eyebrows** | Wind rises: grass ripples, trees and flowers sway, clouds and particles race |
 | **Open mouth** | A pulse of light expands outward through the grass, flowers, trees and particles |
-| **Tilt head** | The whole island tilts with you; turning or moving your head shifts the perspective |
+| **Tilt head** | The horizon tilts with you; turning or moving your head shifts the perspective |
 | **Furrow brows / angry face** | A storm rolls in: plum-red sky, darker light, gusty wind, agitated embers, flowers close, lightning and thunder |
 | **Frown / sad face** | Rain falls, flowers and grass droop, light turns cool blue-grey, fog thickens |
 | **Relaxed face** | Everything eases back to rest, while the garden keeps breathing and swaying on its own |
@@ -51,7 +51,7 @@ Everything the app needs (Three.js, the MediaPipe WASM runtime, and both `.task`
 | **Pinch** (thumb + index) | Plants a new flower where you point; it grows in |
 | **Wave** | A quick hand movement sends a gust of wind |
 
-Controls (top right): camera on/off, ambient sound on/off, reset garden, and the interaction guide. Press **D** for live signal meters, which help when tuning lighting or position.
+Controls (top right): show/hide your face view, camera on/off, ambient sound on/off, reset garden, and the interaction guide. Press **D** for live signal meters, which help when tuning lighting or position.
 
 **Tips:** face the camera with even, front lighting. The first second after your face is found is spent learning *your* neutral face; keep it relaxed. If expressions feel off (for example after changing seat or lighting), press **Reset** to re-learn.
 
@@ -61,8 +61,9 @@ Controls (top right): camera on/off, ambient sound on/off, reset garden, and the
 index.html      landing screen, HUD, guide
 style.css       visual styling (no frameworks)
 js/main.js      app wiring: camera flow, UI, main loop, events
-js/tracking.js  MediaPipe face + hand tracking, expression maths, smoothing
-js/garden.js    Three.js world: island, grass shader, flowers, trees, weather
+js/tracking.js  camera, expression maths, smoothing, gesture detection
+js/tracker-worker.js  runs the MediaPipe models in a Web Worker
+js/garden.js    Three.js world: meadow, grass shader, instanced flowers, trees, weather
 js/audio.js     generative Web Audio ambience (no audio files)
 vendor/         three.module.min.js (r170), @mediapipe/tasks-vision 0.10.14
 models/         face_landmarker.task, hand_landmarker.task
@@ -82,7 +83,9 @@ Every value runs through frame-rate-independent exponential smoothing with separ
 
 **Hands.** Up to two hands. Palm openness is fingertip reach divided by palm size; pinch is thumb-to-index distance with hysteresis; hand speed drives wind gusts. The hand's screen position is projected into the garden.
 
-**Privacy.** Video frames go from the `<video>` element straight into MediaPipe's on-device WebAssembly/WebGL models. Nothing is drawn, recorded, stored or uploaded, and turning the camera off stops the stream.
+**Smooth motion.** The face and hand models run in a Web Worker, so the 3D scene never waits on them (falls back to the main thread if the browser can't, or add `?noworker` to the URL). Flowers, trees, lantern stalks and the camera all move on damped springs, stems bend along a curve in the vertex shader, and grass and flowers ride the same travelling wind waves, so movement flows instead of snapping. If frames drop below ~45 fps the garden lowers resolution and grass density automatically.
+
+**Privacy.** Video frames go from the `<video>` element straight into MediaPipe's on-device WebAssembly/WebGL models. The mirrored preview is drawn only on your screen. Nothing is recorded, stored or uploaded, and turning the camera off stops the stream.
 
 ## Testing without a camera
 

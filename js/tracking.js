@@ -2,7 +2,6 @@
 // All processing is local: frames go from the <video> element straight into
 // the WASM/WebGL models and are never stored or sent anywhere.
 
-import { FaceLandmarker, HandLandmarker, FilesetResolver } from '../vendor/mediapipe/vision_bundle.mjs';
 
 const WASM_PATH = new URL('../vendor/mediapipe/wasm', import.meta.url).href;
 const FACE_MODEL = new URL('../models/face_landmarker.task', import.meta.url).href;
@@ -59,11 +58,11 @@ export class Tracker {
       angry: new Smooth(0.6, 1.4),
       sad: new Smooth(0.7, 1.6),
       eyes: new Smooth(0.03, 0.05),
-      roll: new Smooth(0.25, 0.25),
-      yaw: new Smooth(0.3, 0.3),
-      pitch: new Smooth(0.3, 0.3),
-      fx: new Smooth(0.35, 0.35),
-      fy: new Smooth(0.35, 0.35),
+      roll: new Smooth(0.35, 0.35),
+      yaw: new Smooth(0.4, 0.4),
+      pitch: new Smooth(0.4, 0.4),
+      fx: new Smooth(0.45, 0.45),
+      fy: new Smooth(0.45, 0.45),
       presence: new Smooth(0.3, 0.8),
     };
 
@@ -85,6 +84,41 @@ export class Tracker {
   async load(onProgress = () => {}) {
     if (this.ready) return;
     onProgress('Waking the garden…');
+    // Preferred: run the models in a worker so the render loop never waits.
+    if (typeof Worker !== 'undefined' && typeof createImageBitmap === 'function' && !/[?&]noworker/.test(location.search)) {
+      try {
+        await this._loadWorker();
+        this.mode = 'worker';
+        this.ready = true;
+        return;
+      } catch (e) {
+        console.warn('Worker tracking unavailable, running on the main thread instead.', e);
+        this.worker?.terminate();
+        this.worker = null;
+      }
+    }
+    await this._loadMain();
+    this.mode = 'main';
+    this.ready = true;
+  }
+
+  _loadWorker() {
+    return new Promise((resolve, reject) => {
+      const w = (this.worker = new Worker(new URL('./tracker-worker.js', import.meta.url)));
+      const timer = setTimeout(() => reject(new Error('worker init timed out')), 45000);
+      w.onerror = (e) => { clearTimeout(timer); reject(e.error || new Error(e.message || 'worker error')); };
+      w.onmessage = (e) => {
+        const d = e.data;
+        if (d.type === 'ready') { clearTimeout(timer); this.delegate = d.delegate; resolve(); }
+        else if (d.type === 'error') { clearTimeout(timer); reject(new Error(d.message)); }
+        else if (d.type === 'result') { this._pending = d; this._busy = false; }
+      };
+      w.postMessage({ type: 'init', wasm: WASM_PATH, faceModel: FACE_MODEL, handModel: HAND_MODEL });
+    });
+  }
+
+  async _loadMain() {
+    const { FaceLandmarker, HandLandmarker, FilesetResolver } = await import('../vendor/mediapipe/vision_bundle.mjs');
     const fileset = await FilesetResolver.forVisionTasks(WASM_PATH);
     const make = async (Cls, opts) => {
       try {
@@ -113,7 +147,6 @@ export class Tracker {
         minTrackingConfidence: 0.5,
       }),
     ]);
-    this.ready = true;
   }
 
   async startCamera() {
@@ -156,18 +189,39 @@ export class Tracker {
 
     if (this.running && this.ready && this.video.readyState >= 2) {
       const vt = this.video.currentTime;
-      if (vt !== this.lastVideoTime) {
+      if (this.mode === 'worker') {
+        // hand the newest frame to the worker whenever it is free
+        if (!this._busy && vt !== this.lastVideoTime) {
+          this.lastVideoTime = vt;
+          this._busy = true;
+          this._busySince = nowMs;
+          createImageBitmap(this.video)
+            .then((bitmap) => this.worker.postMessage({ type: 'frame', bitmap, ts: performance.now() }, [bitmap]))
+            .catch(() => { this._busy = false; });
+        } else if (this._busy && nowMs - this._busySince > 2000) {
+          this._busy = false; // a lost frame should never stall tracking
+        }
+        if (this._pending) {
+          faceResult = this._pending.face;
+          handResult = this._pending.hands;
+          this._pending = null;
+        }
+      } else if (vt !== this.lastVideoTime) {
         this.lastVideoTime = vt;
         this.frame++;
         try {
-          faceResult = this.face.detectForVideo(this.video, nowMs);
-          // hands every other new frame keeps things smooth on modest GPUs
-          if (this.frame % 2 === 0) handResult = this.hands.detectForVideo(this.video, nowMs);
+          // alternate the two models so no single frame does both
+          if (this.frame % 2 === 0) faceResult = this.face.detectForVideo(this.video, nowMs);
+          else handResult = this.hands.detectForVideo(this.video, nowMs);
         } catch (e) {
           console.warn('detect failed', e);
         }
       }
     }
+    if (faceResult) this.lastFace = faceResult.faceLandmarks?.[0] || null;
+    if (handResult) this.lastHands = handResult.landmarks || [];
+    if (!this.running) { this.lastFace = null; this.lastHands = []; this._pending = null; }
+    out.newResult = !!(faceResult || handResult);
 
     // ---------- face ----------
     const lm = faceResult?.faceLandmarks?.[0];
@@ -270,7 +324,7 @@ export class Tracker {
       if (this.calib.n === 0) this.faceSeenAt = nowMs;
       this.calib.n++;
       for (const k in raw) this.calib.sum[k] = (this.calib.sum[k] ?? 0) + raw[k];
-      if (this.calib.n >= 45 || (this.calib.n >= 10 && nowMs - this.faceSeenAt > 1500)) {
+      if (this.calib.n >= 45 || (this.calib.n >= 6 && nowMs - this.faceSeenAt > 1200)) {
         this.base = {};
         for (const k in raw) this.base[k] = this.calib.sum[k] / this.calib.n;
       }

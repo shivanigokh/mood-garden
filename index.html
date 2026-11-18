@@ -39,7 +39,16 @@
       <span id="hands-status" class="hands-status"></span>
     </div>
 
+    <figure id="mirror" class="mirror" aria-label="Your camera, mirrored">
+      <video id="cam" playsinline muted autoplay></video>
+      <canvas id="overlay"></canvas>
+      <figcaption id="mood-label">calm</figcaption>
+    </figure>
+
     <nav class="controls" aria-label="Garden controls">
+      <button id="btn-mirror" class="ctl" title="Hide your face" aria-label="Show or hide your camera view" aria-pressed="true">
+        <svg viewBox="0 0 24 24"><path d="M12 3.8c-4 0-6.6 3-6.6 7.2 0 4.6 3 9.2 6.6 9.2s6.6-4.6 6.6-9.2c0-4.2-2.6-7.2-6.6-7.2z"/><circle cx="9.4" cy="11" r=".7" fill="currentColor"/><circle cx="14.6" cy="11" r=".7" fill="currentColor"/><path d="M9.6 15.2c1.4 1.2 3.4 1.2 4.8 0"/></svg>
+      </button>
       <button id="btn-camera" class="ctl" title="Turn camera off" aria-label="Toggle camera">
         <svg viewBox="0 0 24 24"><path d="M4 7.5h3l1.6-2h6.8l1.6 2h3v11H4z"/><circle cx="12" cy="13" r="3.4"/><path class="slash" d="M3 3l18 18"/></svg>
       </button>
@@ -81,7 +90,6 @@
 
   <div id="toast" class="toast" role="alert" hidden></div>
 
-  <video id="cam" playsinline muted autoplay></video>
 
   <script type="module" src="js/main.js"></script>
 </body>

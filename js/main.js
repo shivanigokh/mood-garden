@@ -20,6 +20,12 @@ const debugEl = $('debug');
 const toast = $('toast');
 const flashEl = document.querySelector('.flash');
 const video = $('cam');
+const mirror = $('mirror');
+const overlay = $('overlay');
+const octx = overlay.getContext('2d');
+const moodLabel = $('mood-label');
+const btnMirror = $('btn-mirror');
+let CONN = null; // landmark connection lists, loaded with the tracker
 
 let garden;
 try {
@@ -81,8 +87,20 @@ function enterGarden() {
 async function startCamera() {
   setStatus('loading', 'starting camera…');
   if (!tracker) {
-    const { Tracker } = await import('./tracking.js');
+    const [{ Tracker }, vision] = await Promise.all([import('./tracking.js'), import('../vendor/mediapipe/vision_bundle.mjs')]);
     tracker = new Tracker(video);
+    CONN = {
+      tess: vision.FaceLandmarker.FACE_LANDMARKS_TESSELATION,
+      lines: [
+        ...vision.FaceLandmarker.FACE_LANDMARKS_FACE_OVAL,
+        ...vision.FaceLandmarker.FACE_LANDMARKS_LIPS,
+        ...vision.FaceLandmarker.FACE_LANDMARKS_LEFT_EYE,
+        ...vision.FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE,
+        ...vision.FaceLandmarker.FACE_LANDMARKS_LEFT_EYEBROW,
+        ...vision.FaceLandmarker.FACE_LANDMARKS_RIGHT_EYEBROW,
+      ],
+      hand: vision.HandLandmarker.HAND_CONNECTIONS,
+    };
   }
   // ask for the camera first so the permission prompt appears immediately,
   // and download the models in parallel
@@ -90,6 +108,7 @@ async function startCamera() {
   await tracker.startCamera();
   await loading;
   cameraOn = true;
+  mirror.classList.remove('off');
   btnCamera.classList.remove('off');
   btnCamera.title = 'Turn camera off';
   setStatus('searching', 'looking for you');
@@ -98,6 +117,9 @@ async function startCamera() {
 function stopCamera() {
   tracker?.stopCamera();
   cameraOn = false;
+  mirror.classList.add('off');
+  octx.clearRect(0, 0, overlay.width, overlay.height);
+  moodLabel.textContent = 'camera off';
   btnCamera.classList.add('off');
   btnCamera.title = 'Turn camera on';
   setStatus('off', 'camera off');
@@ -150,6 +172,78 @@ btnCamera.addEventListener('click', async () => {
   }
 });
 
+function setMirror(visible) {
+  mirror.classList.toggle('hidden', !visible);
+  btnMirror.setAttribute('aria-pressed', String(visible));
+  btnMirror.title = visible ? 'Hide your face' : 'Show your face';
+  try { localStorage.setItem('mg-mirror', visible ? '1' : '0'); } catch {}
+}
+btnMirror.addEventListener('click', () => setMirror(mirror.classList.contains('hidden')));
+try { if (localStorage.getItem('mg-mirror') === '0') setMirror(false); } catch {}
+
+// ---------- face + hand overlay on the mirrored preview ----------
+const GESTURE_COL = { open: '#f6d98c', fist: '#f0a3b2', pinch: '#c4b5f5', relaxed: '#fff6e6' };
+function drawOverlay(s, m) {
+  if (mirror.classList.contains('hidden') || !CONN) return;
+  const vw = video.videoWidth || 640, vh = video.videoHeight || 480;
+  if (overlay.width !== vw) { overlay.width = vw; overlay.height = vh; }
+  octx.clearRect(0, 0, vw, vh);
+  const face = tracker?.lastFace;
+  if (face && s.faceFound) {
+    // mood tints the mesh: gold when smiling, rose when stormy, blue when sad
+    const r = Math.round(255 - m.sad * 60 - m.angry * 10), g = Math.round(244 - m.angry * 90 - m.sad * 20 + m.smile * 4), b = Math.round(225 - m.smile * 70 + m.sad * 30 - m.angry * 40);
+    const col = `${r},${g},${b}`;
+    octx.lineWidth = 0.7;
+    octx.strokeStyle = `rgba(${col},0.16)`;
+    octx.beginPath();
+    for (const c of CONN.tess) {
+      const a = face[c.start], z = face[c.end];
+      octx.moveTo(a.x * vw, a.y * vh);
+      octx.lineTo(z.x * vw, z.y * vh);
+    }
+    octx.stroke();
+    octx.lineWidth = 1.8;
+    octx.strokeStyle = `rgba(${col},0.9)`;
+    octx.beginPath();
+    for (const c of CONN.lines) {
+      const a = face[c.start], z = face[c.end];
+      octx.moveTo(a.x * vw, a.y * vh);
+      octx.lineTo(z.x * vw, z.y * vh);
+    }
+    octx.stroke();
+  }
+  const hands = tracker?.lastHands || [];
+  hands.forEach((lm, i) => {
+    const gesture = s.hands[i]?.gesture || 'relaxed';
+    const col = GESTURE_COL[gesture];
+    octx.strokeStyle = col;
+    octx.lineWidth = 2.4;
+    octx.beginPath();
+    for (const c of CONN.hand) {
+      octx.moveTo(lm[c.start].x * vw, lm[c.start].y * vh);
+      octx.lineTo(lm[c.end].x * vw, lm[c.end].y * vh);
+    }
+    octx.stroke();
+    octx.fillStyle = '#fffaf0';
+    for (const p of lm) {
+      octx.beginPath();
+      octx.arc(p.x * vw, p.y * vh, 3, 0, Math.PI * 2);
+      octx.fill();
+    }
+  });
+}
+
+function moodWord(m, s) {
+  if (!s.faceFound) return cameraOn ? 'looking for you…' : 'camera off';
+  if (!s.calibrated) return 'learning your face…';
+  const c = [
+    ['smiling', m.smile], ['stormy', m.angry], ['blue', m.sad],
+    ['breezy', m.brow * 0.9], ['ah!', m.mouth], ['tilting', Math.min(1, Math.abs(m.roll) * 3)],
+  ].sort((a, b) => b[1] - a[1])[0];
+  if (s.hands.length && c[1] < 0.35) return s.hands.map((h) => ({ open: 'open palm', fist: 'fist', pinch: 'pinch', relaxed: 'hand' })[h.gesture]).join(' · ');
+  return c[1] > 0.35 ? c[0] : 'calm';
+}
+
 btnAudio.addEventListener('click', async () => {
   const on = await audio.toggle();
   btnAudio.setAttribute('aria-pressed', String(on));
@@ -189,8 +283,24 @@ garden.onLightning = (s) => {
   audio.thunder(s);
 };
 
+// ---------- adaptive quality: step down if frames are consistently slow ----------
+const perf = { t: 0, n: 0, level: 2, warm: 2.5 };
+function adaptQuality(dt) {
+  if (document.hidden) return;
+  if (perf.warm > 0) { perf.warm -= dt; return; } // ignore shader-compile hitches
+  perf.t += dt; perf.n++;
+  if (perf.t < 2) return;
+  const fps = perf.n / perf.t;
+  perf.t = 0; perf.n = 0;
+  if (fps < 45 && perf.level > 0) {
+    perf.level--;
+    garden.setQuality(perf.level);
+    perf.warm = 1.5;
+  }
+}
+
 // ---------- main loop ----------
-const neutral = { smile: 0, brow: 0, mouth: 0, angry: 0, sad: 0, eyes: 0, roll: 0, yaw: 0, pitch: 0, fx: 0, fy: 0, hands: [], events: { blink: false, pulse: 0, pinches: [] }, faceFound: false, presence: 0 };
+const neutral = { newResult: false, smile: 0, brow: 0, mouth: 0, angry: 0, sad: 0, eyes: 0, roll: 0, yaw: 0, pitch: 0, fx: 0, fy: 0, hands: [], events: { blink: false, pulse: 0, pinches: [] }, faceFound: false, presence: 0 };
 let last = performance.now();
 let faceLostAt = 0;
 
@@ -243,6 +353,12 @@ function frame(now) {
   for (const pin of s.events.pinches) { garden.plantAtScreen(pin.x, pin.y); audio.pluck(); }
 
   garden.update(dt, m);
+  adaptQuality(dt);
+  if (cameraOn && (s.newResult || !s.faceFound)) drawOverlay(s, m);
+  if (cameraOn) {
+    const word = moodWord(m, s);
+    if (moodLabel.textContent !== word) moodLabel.textContent = word;
+  }
   audio.update(m, garden.wind);
   flashEl.style.opacity = String(Math.min(0.45, garden.flashLevel * 0.4));
 
