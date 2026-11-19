@@ -8,8 +8,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Inter:wght@300;400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=6" />
-  <link rel="stylesheet" href="shadows.css?v=6" />
+  <link rel="stylesheet" href="style.css?v=7" />
+  <link rel="stylesheet" href="shadows.css?v=7" />
 </head>
 <body class="shadows">
   <nav class="modes" aria-label="Experiences">
@@ -28,8 +28,8 @@
       <p class="subtitle">Make a shape. Watch it come alive.</p>
       <button id="enter" class="enter">Light the lamp</button>
       <p id="landing-note" class="landing-note">
-        Hold your hand up in front of the camera and its shadow falls on the wall. Make a dog, rabbit, cat or bird
-        and hold it still: the animal jumps off your hand and plays with you. Hand tracking runs on this device and
+        Hold your hand up in front of the camera and its shadow falls on the wall. Make a dog, rabbit, deer, swan,
+        elephant or more and hold it still: the animal jumps off your hand and plays with you. Hand tracking runs on this device and
         nothing is recorded or uploaded.
       </p>
     </div>
@@ -64,22 +64,41 @@
     <aside id="guide" class="guide" aria-label="Hand shapes">
       <h2>Make a shape and hold it</h2>
       <ul>
-        <li><b>Dog</b> index and little finger up like ears, middle fingers tucked onto your thumb.</li>
+        <li><b>Dog</b> index and little finger up, middle fingers tucked.</li>
         <li><b>Rabbit</b> two fingers up in a V.</li>
-        <li><b>Cat</b> thumb and little finger out, the rest curled.</li>
-        <li><b>Bird</b> both hands open, thumbs hooked together.</li>
+        <li><b>Deer</b> three fingers up, little finger tucked.</li>
+        <li><b>Cat</b> thumb and little finger out.</li>
+        <li><b>Elephant</b> a thumbs-up.</li>
+        <li><b>Snake</b> point one finger.</li>
+        <li><b>Swan</b> an OK sign: thumb and index tips touching.</li>
+        <li><b>Bird</b> two open hands, thumbs hooked side by side.</li>
+        <li><b>Butterfly</b> two open hands crossed at the wrists.</li>
+        <li><b>Crocodile</b> two flat hands, one above the other, like jaws.</li>
       </ul>
       <h2>Then play</h2>
       <ul>
-        <li><b>Hold your hand low</b> and they come to sniff it.</li>
+        <li><b>Hold your hand low</b> to be sniffed, nuzzled or snapped at.</li>
         <li><b>Stroke over them</b> with an open hand to pet them.</li>
-        <li><b>Hold it higher</b> and they jump for it. Birds land on a still hand.</li>
+        <li><b>Hold it higher</b> and they jump, rear up or trumpet. Birds and butterflies land on a still hand.</li>
         <li><b>Swipe fast</b> to startle them.</li>
       </ul>
       <button id="guide-hide" class="text-link small">hide</button>
     </aside>
+
+    <div class="tray" role="group" aria-label="Call an animal">
+      <button data-kind="dog">Dog</button>
+      <button data-kind="cat">Cat</button>
+      <button data-kind="rabbit">Rabbit</button>
+      <button data-kind="deer">Deer</button>
+      <button data-kind="elephant">Elephant</button>
+      <button data-kind="snake">Snake</button>
+      <button data-kind="croc">Crocodile</button>
+      <button data-kind="swan">Swan</button>
+      <button data-kind="bird">Bird</button>
+      <button data-kind="butterfly">Butterfly</button>
+    </div>
   </div>
 
-  <script type="module" src="js/shadows.js?v=6"></script>
+  <script type="module" src="js/shadows.js?v=7"></script>
 </body>
 </html>

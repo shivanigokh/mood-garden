@@ -2,7 +2,7 @@
 // Harmonium (squeeze the bellows), air drums and a theremin.
 // Hand tracking: MediaPipe Hand Landmarker (on-device, in a worker). Sound: Web Audio.
 
-import { Tracker } from './tracking.js?v=6';
+import { Tracker } from './tracking.js?v=7';
 
 const $ = (id) => document.getElementById(id);
 const video = $('cam');

@@ -80,20 +80,30 @@ The hand button in the top right hides or shows the hand outlines. All sound is 
 
 ## Shadows (hand shadow puppets)
 
-**Shadows** turns the screen into a lamp-lit wall. Your hands cast shadows on it, and certain shapes come alive when you hold them still for about a second:
+**Shadows** turns the screen into a lamp-lit wall. Your hands cast soft shadows on it, and certain shapes come alive when you hold them still for about a second. You can also call any animal from the row of names at the bottom.
 
 | Shape | Animal |
 | --- | --- |
 | Index and little finger up, middle fingers tucked | **Dog** |
 | Two fingers up in a V | **Rabbit** |
+| Three fingers up, little finger tucked | **Deer** |
 | Thumb and little finger out, the rest curled | **Cat** |
-| Both hands open, thumbs hooked together | **Bird** |
+| Thumbs-up | **Elephant** |
+| One pointing finger | **Snake** |
+| OK sign (thumb and index tips touching) | **Swan** |
+| Both hands open, thumbs hooked side by side | **Bird** |
+| Both hands open, crossed at the wrists | **Butterfly** |
+| Two flat hands, one above the other, like jaws | **Crocodile** |
 
-Once an animal jumps off your hand, it plays with it. It runs over to your hand and follows it along the floor. Hold your hand low and it sniffs it; stroke over it with an open hand to pet it (hearts, wagging, purring). Hold your hand higher and it jumps for it. A cat swats at a fingertip held close to its face. Birds fly to your hand and perch on a still, pointing finger. A fast swipe startles everyone. Up to six animals share the wall; the reset button sends them home.
+Once an animal jumps off your hand, it plays with it. It comes over and follows your hand along the floor, and when several are around they take turns. Hold your hand low and it sniffs or nuzzles it; stroke over it with an open hand to pet it (hearts, wagging, purring). Hold your hand higher and dogs, cats, rabbits and deer jump for it, the elephant reaches with its trunk and trumpets a spray of water, the snake rears up and flicks its tongue, the crocodile lifts its open jaws (and snaps at a hand that darts past), and the swan bends its neck to you. Birds and butterflies land on a still hand. A fast swipe startles everyone.
+
+The silhouettes are built from smooth tapered curves with real walk cycles (two-bone leg IK, stance and swing), tails and ears that swing with a lag, and turns that pivot instead of flipping. Hand landmarks are filtered and lightly predicted between detections, so the shadows glide at the display frame rate.
 
 ## Mirror Pet
 
-**Pet** is Pip, a small fluffy creature who copies your face: head tilt and turn, each eye separately (so it winks back), and your mouth. Pip also reacts to your expressions. A smile makes it blush and bounce, laughing makes it giggle, and raised brows with an open mouth surprise it. A frown makes it teary under a little rain cloud, a scowl turns it red and steaming, and a kiss pout sends hearts. Puffed cheeks make it puff up. Look away for a while and Pip falls asleep, then wakes up when you come back. Click Pip for a boop.
+**Pet** is Pip, a soft little creature who copies your face continuously. Every MediaPipe blendshape drives a matching control on Pip, smoothed only lightly so it keeps up: each eye's blink, squint, widening and gaze; each brow's inner and outer lift and frown; cheek raise and puff; and the mouth's jaw drop, each corner's smile and frown, stretch, pucker, funnel, upper and lower lip and sideways shift. Your head's tilt, turn and nod come straight from the face landmarks. Pip mirrors you like a mirror would: wink your left eye and Pip winks the eye on the left of the screen.
+
+On top of that Pip reacts. A big smile brings blushes, hearts and bounces, and a laugh gets giggles. Surprise makes it jump, sadness brings tears and a little rain cloud, and a scowl makes it go red and steam. A kiss pout sends hearts. Look away and Pip falls asleep, then wakes up when you come back. Click Pip for a boop.
 
 ## How it works
 
@@ -104,6 +114,7 @@ studio.html     hand-played instruments (studio.css, js/studio.js)
 shadows.html    hand shadow puppets (shadows.css, js/shadows.js)
 pet.html        Pip the mirror pet (pet.css, js/pet.js)
 js/shared.js    small helpers and a creature-sound synth for Shadows and Pet
+js/puppets.js   shadow-puppet silhouettes and their animation rigs
 style.css       visual styling (no frameworks)
 js/main.js      app wiring: camera flow, UI, main loop, events
 js/tracking.js  camera, expression maths, smoothing, gesture detection

@@ -18,7 +18,7 @@ body.shadows .modes { background: rgba(250, 244, 230, 0.5); }
 .hint {
   position: absolute;
   left: 50%;
-  bottom: 22px;
+  bottom: 70px;
   transform: translateX(-50%);
   margin: 0;
   max-width: min(520px, calc(100vw - 32px));
@@ -37,6 +37,48 @@ body.shadows .modes { background: rgba(250, 244, 230, 0.5); }
 
 #btn-mirror[aria-pressed="true"], #btn-guide[aria-pressed="true"] { background: rgba(255, 252, 245, 0.75); }
 
+/* call an animal without making the shape */
+.tray {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  max-width: calc(100vw - 32px);
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-radius: 999px;
+  background: rgba(250, 244, 230, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  pointer-events: auto;
+}
+.tray::-webkit-scrollbar { display: none; }
+.tray button {
+  flex: none;
+  font-family: var(--sans);
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  color: rgba(58, 50, 43, 0.8);
+  background: none;
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background 0.3s, color 0.3s;
+}
+.tray button:hover, .tray button:focus-visible { background: rgba(255, 252, 245, 0.8); color: #2a221c; outline: none; }
+
+body.shadows .guide { max-height: calc(100vh - 150px); overflow-y: auto; }
+body.shadows .mirror { bottom: 112px; }
+body.shadows .status { bottom: 72px; }
+
 @media (max-width: 560px) {
-  .hint { bottom: 64px; }
+  .tray { bottom: 64px; }
+  .hint { bottom: 116px; }
+  body.shadows .mirror { bottom: 150px; }
+  body.shadows .status { bottom: 112px; }
 }
