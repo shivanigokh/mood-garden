@@ -113,27 +113,33 @@ export function fitBody(views, front) {
   // --- head (hair included: the front outline at eye height) ---
   const eyeY = J.eyeMid.y;
   const topY = clamp(median(views.map((v) => (v.top >= 0 ? (v.yb - v.top) / v.s : null))) ?? 1, eyeY + 0.04, 1.03);
-  const chinY = eyeY - (topY - eyeY) * 0.85;
   const hr = frontRun(eyeY, J.eyeMid.x, 0.05);
-  const headW = clamp(hr ? hr[1] - hr[0] : 0.13, 0.09, 0.17);
-  const headX = hr ? (hr[0] + hr[1]) / 2 : J.eyeMid.x;
-  const headD = clamp(sideWidth(eyeY) ?? headW * 1.15, headW * 0.95, headW * 1.3);
+  // a slightly big, rounded game head (long hair makes the outline wide, so cap it)
+  const headW = clamp(hr ? hr[1] - hr[0] : 0.13, 0.11, 0.16) * 1.06;
+  const headX = J.eyeMid.x;
+  const headD = clamp(sideWidth(eyeY) ?? headW * 1.15, headW * 1.0, headW * 1.25);
+  const chin0 = eyeY - (topY - eyeY) * 0.85;
+  const headH = clamp(topY - chin0, headW * 1.15, headW * 1.4);
+  const chinY = Math.min(chin0, topY - headH);
   {
-    const cy = (topY + chinY) / 2, ry = (topY - chinY) / 2;
+    const top = chinY + headH;
+    const cy = (top + chinY) / 2, ry = headH / 2;
     const pts = [];
-    for (let i = 0; i <= 12; i++) {
-      const y = chinY + 0.004 + (i / 12) * (topY - chinY - 0.008);
-      const e = Math.sqrt(Math.max(0.0025, 1 - Math.pow((y - cy) / ry, 2)));
-      // a little narrower at the jaw than at the crown
-      const jaw = y < cy ? lerp(0.78, 1, (y - chinY) / (cy - chinY)) : 1;
-      pts.push({ p: new THREE.Vector3(headX, y, 0.0), rx: (headW / 2) * e * jaw, rz: (headD / 2) * e });
+    const n = 20;
+    for (let i = 0; i <= n; i++) {
+      // cosine spacing puts more rings near the crown and chin, so both stay round
+      const f = 0.5 - 0.5 * Math.cos((i / n) * Math.PI);
+      const y = chinY + f * headH;
+      const e = Math.sqrt(Math.max(0.0004, 1 - Math.pow((y - cy) / ry, 2)));
+      const jaw = y < cy ? lerp(0.86, 1, Math.min(1, (y - chinY) / (cy - chinY) * 1.3)) : 1;
+      pts.push({ p: new THREE.Vector3(headX, y, 0.004), rx: (headW / 2) * e * jaw, rz: (headD / 2) * e });
     }
-    parts.push({ ...tube(pts), bones: [['head', V(J.shMid), new THREE.Vector3(headX, topY, 0)]] });
+    parts.push({ ...tube(pts, false, false), bones: [['head', V(J.shMid), new THREE.Vector3(headX, top, 0)]] });
   }
-  // --- neck ---
+  // --- neck (runs up inside the head so there's no gap) ---
   {
-    const nr = 0.03 * k;
-    parts.push({ ...tube([{ p: V(J.shMid).setY(J.shMid.y - 0.03), rx: nr, rz: nr }, { p: new THREE.Vector3(headX, chinY + 0.03, -0.005), rx: nr * 0.9, rz: nr * 0.9 }]), bones: [['spine', V(J.hipMid), V(J.shMid)], ['head', V(J.shMid), new THREE.Vector3(headX, topY, 0)]] });
+    const nr = 0.036 * k;
+    parts.push({ ...tube([{ p: V(J.shMid).setY(J.shMid.y - 0.04), rx: nr * 1.1, rz: nr }, { p: new THREE.Vector3(headX, chinY + 0.05, -0.004), rx: nr * 0.92, rz: nr * 0.92 }], false, false), bones: [['spine', V(J.hipMid), V(J.shMid)], ['head', V(J.shMid), new THREE.Vector3(headX, topY, 0)]] });
   }
   // --- torso: hips to shoulders, width from the front outline, depth from the side ---
   const hipY = J.hipMid.y, shY = J.shMid.y;
@@ -154,11 +160,17 @@ export function fitBody(views, front) {
       const d = clamp(sideWidth(y) ?? w * 0.6, w * 0.5, w * 0.78);
       pts.push({ p: new THREE.Vector3(cx, y, 0), rx: w / 2, rz: d / 2 });
     }
-    // shoulders slope into the neck
+    // even out the bumps (arms touching your sides, loose clothes)
+    for (let pass = 0; pass < 3; pass++) {
+      const rx = pts.map((q) => q.rx), rz = pts.map((q) => q.rz);
+      for (let i = 1; i < pts.length - 1; i++) { pts[i].rx = 0.25 * rx[i - 1] + 0.5 * rx[i] + 0.25 * rx[i + 1]; pts[i].rz = 0.25 * rz[i - 1] + 0.5 * rz[i] + 0.25 * rz[i + 1]; }
+    }
+    // rounded shoulders that slope into the neck
     const last = pts[pts.length - 1];
-    pts.push({ p: new THREE.Vector3(J.shMid.x, shY + 0.02, -0.005), rx: last.rx * 0.78, rz: last.rz * 0.85 });
-    pts.push({ p: new THREE.Vector3(J.shMid.x, shY + 0.04, -0.008), rx: last.rx * 0.42, rz: last.rz * 0.6 });
-    parts.push({ ...tube(pts, true, true), bones: [['hips', V(J[24]), V(J[23])], ['spine', V(J.hipMid), V(J.shMid)]] });
+    for (const [dy, kx, kz] of [[0.015, 0.97, 0.97], [0.03, 0.88, 0.92], [0.045, 0.68, 0.8], [0.056, 0.4, 0.55]]) {
+      pts.push({ p: new THREE.Vector3(J.shMid.x, shY - 0.015 + dy, -0.004), rx: last.rx * kx, rz: last.rz * kz });
+    }
+    parts.push({ ...tube(pts, true, false), bones: [['hips', V(J[24]), V(J[23])], ['spine', V(J.hipMid), V(J.shMid)]] });
   }
   // --- lower body: from the hips down to where the outline splits into two legs ---
   // (just below the crotch in trousers, at the hem of a skirt or dress)
@@ -210,9 +222,10 @@ export function fitBody(views, front) {
   for (const [s, e, w, ua, fa] of [[11, 13, 15, 'uArmL', 'fArmL'], [12, 14, 16, 'uArmR', 'fArmR']]) {
     const S = V(J[s]), E = V(J[e]), W = V(J[w]);
     const H = W.clone().addScaledVector(W.clone().sub(E).normalize(), 0.07);
-    const S0 = S.clone().addScaledVector(S.clone().sub(E).normalize(), -0.01);
+    const S0 = S.clone().addScaledVector(S.clone().sub(E).normalize(), 0.025).setY(S.y + 0.005);
     const pts = [
-      { p: S0, rx: 0.04 * k, rz: 0.042 * k },
+      { p: S0, rx: 0.046 * k, rz: 0.046 * k },
+      { p: S.clone().lerp(E, 0.15), rx: 0.042 * k, rz: 0.042 * k },
       { p: S.clone().lerp(E, 0.5), rx: 0.034 * k, rz: 0.036 * k },
       { p: E, rx: 0.03 * k, rz: 0.031 * k },
       { p: E.clone().lerp(W, 0.5), rx: 0.028 * k, rz: 0.028 * k },
