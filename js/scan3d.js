@@ -43,9 +43,135 @@ export function measure(caps) {
     out.push({ ...c, x0, top, bot, px: bot - top, cutFeet: bot >= h - 3, cutHead: top <= 1 });
   }
   const hs = out.filter((v) => v.px > 20).map((v) => v.px).sort((a, b) => a - b);
-  const s = hs.length ? hs[Math.floor(hs.length / 2)] : 1;
-  for (const v of out) { v.s = s; v.yb = v.bot >= 0 ? v.bot : v.h; }
+  const sMed = hs.length ? hs[Math.floor(hs.length / 2)] : 1;
+  // people drift toward or away from the camera while turning: use each view's own
+  // height when the whole body is in frame (smoothed over neighbours), else the median
+  const own = out.map((v) => (v.px > 20 && !v.cutFeet && !v.cutHead && Math.abs(v.px / sMed - 1) < 0.25 ? v.px : sMed));
+  out.forEach((v, i) => {
+    const nb = [-2, -1, 0, 1, 2].map((d) => own[(i + d + out.length) % out.length]).sort((a, b) => a - b);
+    v.s = out.length >= 5 ? nb[2] : sMed;
+    v.yb = v.bot >= 0 ? v.bot : v.h;
+  });
+  // the turning axis: the middle of the body between hips and chest, from the mask
+  // (hip landmarks wander when you're side-on or facing away)
+  for (const v of out) {
+    if (v.px <= 20) continue;
+    const xs = [];
+    for (let y = Math.round(v.yb - 0.72 * v.s); y <= Math.round(v.yb - 0.45 * v.s); y += 2) {
+      if (y < 0 || y >= v.h) continue;
+      // the run of body pixels nearest the current centre guess
+      const cx = Math.round(v.x0 ?? v.w / 2);
+      let a = -1, b = -1;
+      for (let d = 0; d < v.w / 3 && a < 0; d++) {
+        for (const x of [cx - d, cx + d]) if (x >= 0 && x < v.w && v.mask[y * v.w + x] > 0.5) { a = b = x; break; }
+      }
+      if (a < 0) continue;
+      while (a > 0 && v.mask[y * v.w + a - 1] > 0.5) a--;
+      while (b < v.w - 1 && v.mask[y * v.w + b + 1] > 0.5) b++;
+      xs.push((a + b) / 2);
+    }
+    if (xs.length > 4) { xs.sort((p, q) => p - q); v.x0 = xs[Math.floor(xs.length / 2)]; }
+  }
+  // overall exposure: webcam shots indoors come out dark, so lift them a little
+  let lum = 0, cnt = 0;
+  for (const v of out) {
+    if (!v.rgba) continue;
+    for (let i = 0; i < v.mask.length; i += 97) if (v.mask[i] > 0.5) { lum += 0.299 * v.rgba[i * 4] + 0.587 * v.rgba[i * 4 + 1] + 0.114 * v.rgba[i * 4 + 2]; cnt++; }
+  }
+  const mean = cnt ? lum / cnt / 255 : 0.5;
+  for (const v of out) v.gain = Math.max(1, Math.min(1.6, 0.48 / Math.max(mean, 0.05)));
   return out;
+}
+
+// Fix each shot's turn angle by silhouette consistency: the right angle for a shot is
+// the one where carving with it removes nothing that the other shots can see.
+// Works on a coarse grid; call after measure() and before prepare().
+export async function alignViews(views, progress = () => {}) {
+  const V = views.length;
+  if (V < 6) return;
+  const NU = 48, NV = 50, G = 40, GY = 42;
+  const c = (BOX.u1 - BOX.u0) / G, cy = BOX.y1 / GY;
+  // coarse masks on the (u, y) lattice
+  const M = views.map((v) => {
+    const m = new Uint8Array(NU * NV);
+    for (let j = 0; j < NV; j++) {
+      const y = ((j + 0.5) / NV) * BOX.y1, iy = Math.round(v.yb - y * v.s);
+      for (let i = 0; i < NU; i++) {
+        const u = BOX.u0 + ((i + 0.5) / NU) * (BOX.u1 - BOX.u0), ix = Math.round(v.x0 + u * v.s);
+        if (ix < 0 || iy < 0 || ix >= v.w || iy >= v.h) { m[j * NU + i] = v.cutFeet && iy >= v.h ? 1 : 0; continue; }
+        // a little generous: any body pixel in a 3x3 patch
+        let hit = 0;
+        for (let dy = -1; dy <= 1 && !hit; dy++) for (let dx = -1; dx <= 1; dx++) {
+          const xx = ix + dx * 2, yy = iy + dy * 2;
+          if (xx >= 0 && yy >= 0 && xx < v.w && yy < v.h && v.mask[yy * v.w + xx] > 0.5) { hit = 1; break; }
+        }
+        m[j * NU + i] = hit;
+      }
+    }
+    return m;
+  });
+  const NVOX = G * GY * G;
+  const vx = new Float32Array(NVOX), vz = new Float32Array(NVOX), vj = new Int16Array(NVOX);
+  for (let iz = 0, q = 0; iz < G; iz++) for (let iy = 0; iy < GY; iy++) for (let ix = 0; ix < G; ix++, q++) {
+    vx[q] = BOX.u0 + (ix + 0.5) * c; vz[q] = BOX.u0 + (iz + 0.5) * c;
+    vj[q] = Math.min(NV - 1, Math.floor((((iy + 0.5) * cy) / BOX.y1) * NV));
+  }
+  const col = (q, th) => {
+    const u = vx[q] * Math.cos(th) + vz[q] * Math.sin(th);
+    return Math.floor(((u - BOX.u0) / (BOX.u1 - BOX.u0)) * NU);
+  };
+  const outside = (k, th, out) => {
+    const cs = Math.cos(th), sn = Math.sin(th), m = M[k];
+    for (let q = 0; q < NVOX; q++) {
+      const ui = Math.floor(((vx[q] * cs + vz[q] * sn - BOX.u0) / (BOX.u1 - BOX.u0)) * NU);
+      out[q] = ui < 0 || ui >= NU || !m[vj[q] * NU + ui] ? 1 : 0;
+    }
+  };
+  const allow = 2;
+  const outs = views.map((v, k) => { const o = new Uint8Array(NVOX); outside(k, v.theta, o); return o; });
+  const miss = new Uint8Array(NVOX);
+  for (let k = 0; k < V; k++) for (let q = 0; q < NVOX; q++) miss[q] += outs[k][q];
+  const cand = new Uint8Array(NVOX), hit = new Uint8Array(NU * NV);
+  // pixels of view j's mask that the kept voxels no longer cover
+  const lost = (j, keep) => {
+    hit.fill(0);
+    const th = views[j].theta, cs = Math.cos(th), sn = Math.sin(th);
+    for (let q = 0; q < NVOX; q++) {
+      if (!keep(q)) continue;
+      const ui = Math.floor(((vx[q] * cs + vz[q] * sn - BOX.u0) / (BOX.u1 - BOX.u0)) * NU);
+      if (ui >= 0 && ui < NU) hit[vj[q] * NU + ui] = 1;
+    }
+    let n = 0;
+    const m = M[j];
+    for (let i = 0; i < hit.length; i++) if (m[i] && !hit[i]) n++;
+    return n;
+  };
+  const STEP = (4 * Math.PI) / 180, RANGE = 7;
+  for (let pass = 0; pass < 2; pass++) {
+    for (let k = 0; k < V; k++) {
+      const v = views[k];
+      const others = [1, 3, 6, 9, 12, 15, 18, 21, V - 1].map((d) => (k + d) % V).filter((j, i, a) => j !== k && a.indexOf(j) === i);
+      let best = v.theta, bestScore = Infinity;
+      for (let r = -RANGE; r <= RANGE; r++) {
+        const th = v.theta + r * STEP * (pass ? 0.5 : 1);
+        outside(k, th, cand);
+        const keep = (q) => miss[q] - outs[k][q] + cand[q] <= allow;
+        let sc = 0;
+        for (const j of others) sc += lost(j, keep);
+        sc += Math.abs(r) * 0.5; // prefer small moves when it's a tie
+        if (sc < bestScore) { bestScore = sc; best = th; }
+      }
+      if (best !== v.theta) {
+        outside(k, best, cand);
+        for (let q = 0; q < NVOX; q++) miss[q] += cand[q] - outs[k][q];
+        outs[k].set(cand);
+        v.theta = best;
+      }
+      progress((pass * V + k + 1) / (2 * V));
+      if (k % 2 === 1) await yieldFrame();
+    }
+  }
+  for (const v of views) { v.cos = Math.cos(v.theta); v.sin = Math.sin(v.theta); }
 }
 
 // crop mask to the voxel lattice, and the image to a texture cell
@@ -80,6 +206,9 @@ export function prepare(views, res) {
     const img = new ImageData(cw, ch);
     const d = img.data;
     const fg = new Uint8Array(cw * ch);
+    // brighten dark webcam shots with a gentle gamma lift (keeps highlights)
+    const lut = new Uint8ClampedArray(256);
+    for (let i = 0; i < 256; i++) lut[i] = 255 * Math.pow(i / 255, 1 / (v.gain || 1));
     for (let y = 0; y < ch; y++) {
       const yy = (1 - (y + 0.5) / ch) * BOX.y1;
       const sy = v.yb - yy * v.s;
@@ -92,7 +221,7 @@ export function prepare(views, res) {
         const x0 = Math.floor(sx), y0 = Math.floor(sy), fx = sx - x0, fy = sy - y0;
         const i00 = (y0 * v.w + x0) * 4, i10 = i00 + 4, i01 = i00 + v.w * 4, i11 = i01 + 4;
         for (let k = 0; k < 3; k++) {
-          d[o + k] = (v.rgba[i00 + k] * (1 - fx) + v.rgba[i10 + k] * fx) * (1 - fy) + (v.rgba[i01 + k] * (1 - fx) + v.rgba[i11 + k] * fx) * fy;
+          d[o + k] = lut[Math.round((v.rgba[i00 + k] * (1 - fx) + v.rgba[i10 + k] * fx) * (1 - fy) + (v.rgba[i01 + k] * (1 - fx) + v.rgba[i11 + k] * fx) * fy)];
         }
         d[o + 3] = 255;
         fg[y * cw + x] = v.mask[y0 * v.w + x0] > 0.5 ? 1 : 0;
@@ -355,12 +484,12 @@ export function viewWeights(mesh, normals, views, occ, res, c) {
         if (Math.abs(x) > 0.5 || Math.abs(z) > 0.5) break;
       }
       if (blocked) continue;
-      tmp[k] = Math.pow(facing, 4);
+      tmp[k] = Math.pow(facing, 14);
       any = true;
     }
     if (!any) tmp[bestK] = 1; // seen by nobody (top of the head, under the arms): nearest guess
     // keep the three strongest views so the texture stays crisp
-    const order = Array.from(tmp.keys()).sort((a, b) => tmp[b] - tmp[a]).slice(0, 3);
+    const order = Array.from(tmp.keys()).sort((a, b) => tmp[b] - tmp[a]).slice(0, 2);
     let sum = 0;
     for (const k of order) sum += tmp[k];
     for (const k of order) if (tmp[k] > 0) W[i * 24 + k] = tmp[k] / sum;

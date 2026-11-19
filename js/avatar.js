@@ -11,9 +11,9 @@
 
 import * as THREE from 'three';
 import { PoseTracker } from './body.js?v=11';
-import { ScanCover } from './scan-cover.js?v=1';
+import { ScanCover } from './scan-cover.js?v=2';
 import { clamp01, ease, cameraErrorMessage, Sfx, setupToggle } from './shared.js?v=8';
-import * as S3 from './scan3d.js?v=9';
+import * as S3 from './scan3d.js?v=10';
 
 const $ = (id) => document.getElementById(id);
 const video = $('cam');
@@ -156,14 +156,14 @@ const skinMat = new THREE.ShaderMaterial({
       vec3 L = normalize(vec3(-0.45, 0.55, 0.7));
       float ndl = dot(n, L);
       // toon: three light bands, punchier colour, a warm sunset rim
-      float band = ndl > 0.3 ? 1.04 : ndl > -0.15 ? 0.84 : 0.66;
+      float band = ndl > 0.3 ? 1.06 : ndl > -0.15 ? 0.93 : 0.8;
       float lum = dot(col, vec3(0.299, 0.587, 0.114));
-      vec3 sat = mix(vec3(lum), col, 1.3);
+      vec3 sat = mix(vec3(lum), col, 1.2);
       vec3 post = mix(sat, floor(sat * 8.0 + 0.5) / 8.0, 0.45);
-      vec3 shadeTint = mix(vec3(0.82, 0.74, 1.0), vec3(1.0), step(0.3, ndl));
+      vec3 shadeTint = mix(vec3(0.9, 0.86, 1.0), vec3(1.0), step(0.3, ndl));
       vec3 t = post * band * shadeTint;
       float rim = pow(1.0 - max(dot(n, normalize(vV)), 0.0), 3.0);
-      t += rim * vec3(1.0, 0.55, 0.4) * 0.45;
+      t += rim * vec3(1.0, 0.6, 0.45) * 0.22;
       vec3 photo = col * (0.9 + 0.12 * max(ndl, 0.0));
       gl_FragColor = vec4(clamp(mix(photo, t, toon), 0.0, 1.0), 1.0);
     }`,
@@ -324,9 +324,9 @@ function refineYaw(world, nominal) {
     const d = Math.abs(Math.atan2(Math.sin(cand - nominal), Math.cos(cand - nominal)));
     if (d < bd) { bd = d; best = cand; }
   }
-  if (bd > (35 * Math.PI) / 180) return nominal;
+  if (bd > (50 * Math.PI) / 180) return nominal;
   const d = Math.atan2(Math.sin(best - nominal), Math.cos(best - nominal));
-  return nominal + d * 0.65; // lean on the measurement, not all the way
+  return nominal + d * 0.85; // mostly the measurement: people rarely turn at the guide's pace
 }
 
 function scanStep(dt, person) {
@@ -335,7 +335,7 @@ function scanStep(dt, person) {
     const chk = lm ? bodyCheck(lm) : null;
     fullT = chk?.full ? fullT + dt : chk?.ok ? fullT + dt * 0.5 : 0;
     setBanner(!lm ? 'Step into the frame so I can see you' :
-      chk.full ? 'Got you head to toe. Arms a little out, hold still…' :
+      chk.full ? 'Got you! Hold your arms out from your sides like an A…' :
       chk.ok ? 'Nearly: step back to show your feet, or press Start turning' :
       !chk.headIn ? 'Your head is cut off: tilt the camera up or step back' :
       'Step back so I can see you down to your knees');
@@ -369,7 +369,7 @@ function scanStep(dt, person) {
     }
     const pct = Math.round((scan.caps.length / N_VIEWS) * 100);
     if (scan.fails >= 4) setBanner(`Camera capture is failing (${scan.err}) · ${pct}%`);
-    else setBanner(seen ? `Turn slowly to your left with the figure · shot ${scan.caps.length} of ${N_VIEWS}` : 'Come back into view');
+    else setBanner(seen ? `Arms slightly out, turn slowly left with the figure · ${scan.caps.length}/${N_VIEWS}` : 'Come back into view');
   }
 }
 
@@ -381,10 +381,18 @@ async function build(caps) {
   const step = async (f, text) => { bar.style.width = Math.round(f * 100) + '%'; label.textContent = text; await new Promise((r) => setTimeout(r, 16)); };
   try {
     await step(0.02, 'Lining up your silhouettes…');
+    // smooth the turn angles: unwrap, keep them in order, and even out jitter
+    const th = caps.map((c) => c.theta);
+    for (let i = 1; i < th.length; i++) while (th[i] < th[i - 1] - Math.PI) th[i] += TAU;
+    const sm = th.map((t, i) => (i === 0 || i === th.length - 1 ? t : 0.5 * t + 0.25 * (th[i - 1] + th[i + 1])));
+    for (let i = 1; i < sm.length; i++) if (sm[i] < sm[i - 1] + 0.02) sm[i] = sm[i - 1] + 0.02;
+    caps.forEach((c, i) => (c.theta = sm[i]));
     const views = S3.measure(caps);
     const bad = views.filter((v) => v.px < 40).length;
     if (bad > N_VIEWS / 3) throw new Error('The camera lost you during the turn. Try again with more light and a plainer background.');
     await step(0.08, 'Cutting out your outline from every angle…');
+    await step(0.05, 'Lining up the angle of every shot…');
+    await S3.alignViews(views, (f) => { bar.style.width = Math.round((0.05 + f * 0.12) * 100) + '%'; });
     const atlasInfo = S3.prepare(views, RES);
     await step(0.18, 'Carving your shape…');
     const { occ, c } = await S3.carve(views, RES, (f) => { bar.style.width = Math.round((0.18 + f * 0.42) * 100) + '%'; });
@@ -413,6 +421,7 @@ async function build(caps) {
     scan.state = 'done';
     buildEl.hidden = true;
     mirror.classList.remove('big');
+    $('btn-scan').textContent = 'Rescan';
     setTimeout(sizeScanCanvas, 750);
     model.group.visible = true;
     ['btn-mode', 'btn-look', 'btn-glb', 'btn-poster'].forEach((id) => ($(id).disabled = false));

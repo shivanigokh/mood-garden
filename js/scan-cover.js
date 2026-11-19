@@ -2,7 +2,7 @@
 // fills in with your real colours as each angle is captured. Parts no shot has
 // seen yet stay a grey hologram, so you can see what is still to scan.
 import * as THREE from 'three';
-import * as S3 from './scan3d.js?v=9';
+import * as S3 from './scan3d.js?v=10';
 
 // a generic standing body (unit height, image-right = +x) used until the first capture
 const GENERIC = (() => {

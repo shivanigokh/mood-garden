@@ -137,10 +137,11 @@ No camera? Click to drop food and drag to stir. **Draw a fish** opens a sketch p
 
 When the turn is done, the page builds the model in your browser:
 
-1. **Shape (visual hull).** A 200³ voxel grid is carved by all 24 silhouettes (a voxel that falls outside the mask in more than two views is removed), small specks are dropped, and the result is smoothed and meshed with surface nets.
-2. **Paint.** Every point on the surface is coloured from the camera frames that faced it best and actually saw it (not hidden behind an arm), blended across the top three views. Your face, hair and clothes come from the photos themselves, not a palette.
-3. **Look.** A toon shader (banded light, rim light, ink outline) gives it the game look. **Photo look** switches to plain photo texture.
-4. **Rig.** The mesh gets an 11-bone skeleton placed from your landmarks, and **Copy me** poses it from your live body. **Turntable** spins it, and you can drag to rotate.
+1. **Line up.** People never turn at exactly the guide's pace, so each shot's angle is corrected first: for every shot, nearby angles are tried on a coarse grid and the one that carves away the least of what the other shots can see wins.
+2. **Shape (visual hull).** A 200³ voxel grid is carved by all 24 silhouettes (a voxel that falls outside the mask in more than two views is removed), small specks are dropped, and the result is smoothed and meshed with surface nets.
+3. **Paint.** Every point on the surface is coloured from the camera frames that faced it best and actually saw it (not hidden behind an arm), mostly from the single best shot so it stays sharp, and dark shots are brightened a little. Your face, hair and clothes come from the photos themselves, not a palette.
+4. **Look.** A toon shader (banded light, rim light, ink outline) gives it the game look. **Photo look** switches to plain photo texture.
+5. **Rig.** The mesh gets an 11-bone skeleton placed from your landmarks, and **Copy me** poses it from your live body. **Turntable** spins it, and you can drag to rotate.
 
 **Save 3D** downloads a .glb (vertex-coloured mesh, opens in Blender, Windows 3D Viewer and most game engines). **Make poster** builds a loading-screen style poster with the 3D render you can save as a PNG. All artwork, type treatment and names are original, and nothing leaves your computer.
 
