@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Avatar · Mood Garden</title>
+  <meta name="description" content="Scan your whole body with the camera and become a bold, cel-shaded open-world game character that moves with you, then make a poster of it. Body tracking runs on your device." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css?v=8" />
+  <link rel="stylesheet" href="avatar.css?v=8" />
+</head>
+<body class="avatar">
+  <nav class="modes" aria-label="Experiences">
+    <a href="./">Garden</a>
+    <a href="feast.html">Feast</a>
+    <a href="studio.html">Studio</a>
+    <a href="shadows.html">Shadows</a>
+    <a href="pet.html">Pet</a>
+    <a href="party.html">Party</a>
+    <a href="tank.html">Tank</a>
+    <a href="avatar.html" aria-current="page">Avatar</a>
+  </nav>
+  <script>document.querySelector('.modes [aria-current]')?.scrollIntoView({ inline: 'center', block: 'nearest' });</script>
+
+  <canvas id="stage" aria-label="Your game character"></canvas>
+
+  <section id="landing" class="landing av-landing">
+    <div class="landing-inner">
+      <h1 class="av-title">AVATAR</h1>
+      <p class="av-sub">Step into the game. A full-body scan turns you into an open-world hero that moves when you move.</p>
+      <button id="enter" class="av-btn">Scan me</button>
+      <p id="landing-note" class="landing-note">
+        Stand back so the camera can see you from head to toe. Your colours and pose are read on this device and nothing is recorded or uploaded.
+      </p>
+    </div>
+  </section>
+
+  <div id="hud" class="hud" hidden>
+    <figure id="mirror" class="mirror av-mirror">
+      <video id="cam" playsinline muted autoplay></video>
+      <canvas id="scan" aria-hidden="true"></canvas>
+      <figcaption id="scan-cap">scanner</figcaption>
+    </figure>
+
+    <div id="banner" class="av-banner" aria-live="polite"></div>
+    <div id="swatches" class="av-swatches" hidden></div>
+
+    <div class="av-actions" id="actions">
+      <button id="btn-scan" class="av-chip">Rescan</button>
+      <button id="btn-hair" class="av-chip" disabled>Hair</button>
+      <button id="btn-shades" class="av-chip" aria-pressed="false" disabled>Shades</button>
+      <button id="btn-poster" class="av-chip hot" disabled>Make poster</button>
+    </div>
+
+    <div id="status" class="status" data-state="loading" role="status">
+      <span class="dot"></span><span class="status-text">starting camera…</span>
+    </div>
+
+    <nav class="controls" aria-label="Avatar controls">
+      <button id="btn-mirror" class="ctl" title="Hide your camera" aria-label="Show or hide your camera view" aria-pressed="true">
+        <svg viewBox="0 0 24 24"><rect x="3.5" y="6.5" width="13" height="11" rx="2.5"/><path d="M16.5 10.5l4-2.5v8l-4-2.5"/></svg>
+      </button>
+      <button id="btn-audio" class="ctl" title="Sound" aria-label="Toggle sound" aria-pressed="true">
+        <svg viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path class="wave" d="M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a7.8 7.8 0 0 1 0 11"/><path class="slash" d="M15.5 9.5l5 5M20.5 9.5l-5 5"/></svg>
+      </button>
+    </nav>
+
+    <section id="poster-view" class="poster-view" hidden aria-label="Your poster">
+      <img id="poster-img" alt="Your character poster" />
+      <div class="poster-actions">
+        <a id="poster-save" class="av-btn small" download="my-avatar-poster.png">Save poster</a>
+        <button id="poster-again" class="av-chip">New title</button>
+        <button id="poster-close" class="av-chip">Back</button>
+      </div>
+    </section>
+  </div>
+
+  <script type="module" src="js/avatar.js?v=8"></script>
+</body>
+</html>

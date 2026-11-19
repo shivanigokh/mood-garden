@@ -131,6 +131,17 @@ Play all four as a party (stars per game, a final title or a champion's crown) o
 
 No camera? Click to drop food and drag to stir. **Draw a fish** opens a sketch pad (colours, brush, fill, eraser, undo). Draw with the mouse or a finger, or pinch in the air to draw with your hand, name it and release it. Your drawing is sliced into strips that ride the same swimming wave as the other fish, it turns to face where it swims, and it stays in the tank (saved in this browser, up to 12).
 
+## Avatar (full-body scan)
+
+**Avatar** turns you into a bold, cel-shaded open-world game hero. Stand back so the camera sees you head to toe and hold still for three seconds while the scanner sweeps over you (a cyan hologram of the character copies you while it waits). During the scan, MediaPipe Pose places sample points on your hair, cheeks, shirt, upper arms and forearms, thighs, shins and shoes, and the camera frame is read at those points over many frames (median colour, so a passing shadow doesn't count). From that it picks:
+
+- skin, hair, top, trousers and shoe colours, nudged toward an illustrated palette
+- a jacket if your forearms match your top, otherwise a tee with bare arms
+- shorts if your shins look like skin
+- long hair if the area beside your jaw matches your hair
+
+If only your upper body is visible, it scans what it can and guesses the legs. The finished character is wiped in from the top, then mirrors your pose live (arms, legs, lean, head tilt and turn) on a sunset city street, drawn in two-tone cel shading with thick ink outlines. **Hair** cycles styles, **Shades** adds sunglasses, and **Make poster** builds a loading-screen style poster (title from your outfit colour, player profile stats, reputation stars) you can save as a PNG. All artwork, type treatment and names are original.
+
 ## How it works
 
 ```
@@ -141,6 +152,7 @@ shadows.html    hand shadow puppets (shadows.css, js/shadows.js)
 pet.html        Pip the mirror pet (pet.css, js/pet.js)
 party.html      motion minigames (party.css, js/party.js)
 tank.html       hand-played aquarium with drawn fish (tank.css, js/tank.js)
+avatar.html     full-body scan into a game character (avatar.css, js/avatar.js)
 js/body.js      full-body tracking (MediaPipe Pose) with one-euro smoothing
 js/pose-worker.js  runs the pose model in a Web Worker
 js/shared.js    small helpers and a creature-sound synth for Shadows and Pet
