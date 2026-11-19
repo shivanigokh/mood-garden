@@ -14,7 +14,7 @@ import { PoseTracker } from './body.js?v=11';
 import { ScanCover } from './scan-cover.js?v=2';
 import { clamp01, ease, cameraErrorMessage, Sfx, setupToggle } from './shared.js?v=8';
 import * as S3 from './scan3d.js?v=10';
-import * as Fit from './fitbody.js?v=2';
+import * as Fit from './fitbody.js?v=4';
 
 const $ = (id) => document.getElementById(id);
 const video = $('cam');
@@ -409,7 +409,7 @@ async function build(caps) {
     const Wts = S3.viewWeights(mesh, normals, views, occ, ORES, c);
     await step(0.92, 'Rigging your skeleton…');
     buildModel(mesh, normals, Wts, views, atlasInfo, front, fit.skin);
-    Object.assign(model, { atlasInfo, weights: Wts, meshData: mesh, normals, title: makeTitle(front), reveal: 0 });
+    Object.assign(model, { atlasInfo, weights: Wts, meshData: mesh, normals, title: makeTitle(front), reveal: 0, fitInfo: { skirt: fit.skirt, hair: fit.hair } });
     await step(1, 'Done');
     scan.state = 'done';
     buildEl.hidden = true;

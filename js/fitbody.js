@@ -172,6 +172,100 @@ export function fitBody(views, front) {
     }
     parts.push({ ...tube(pts, true, false), bones: [['hips', V(J[24]), V(J[23])], ['spine', V(J.hipMid), V(J.shMid)]] });
   }
+  // --- hair: its own shape, measured from the back and front shots ---
+  const hair = buildHair();
+  function buildHair() {
+    const back = views.reduce((a, b) => (Math.cos(b.theta) < Math.cos(a.theta) ? b : a));
+    const px = (v, u, y) => {
+      const x = Math.round(v.x0 + u * v.s), yy = Math.round(v.yb - y * v.s);
+      if (x < 0 || yy < 0 || x >= v.w || yy >= v.h) return null;
+      const i = yy * v.w + x;
+      if (v.mask[i] < 0.5) return null;
+      return [v.rgba[i * 4], v.rgba[i * 4 + 1], v.rgba[i * 4 + 2]];
+    };
+    // hair colour: the median of a patch at the back of the head, just under the crown
+    const bu = -headX; // the back shot is mirrored left to right
+    const samples = [];
+    for (let dy = 0.015; dy <= 0.06; dy += 0.008) for (let du = -0.03; du <= 0.03; du += 0.01) { const c = px(back, bu + du, topY - dy); if (c) samples.push(c); }
+    if (samples.length < 5) return null;
+    const med = [0, 1, 2].map((k) => median(samples.map((c) => c[k])));
+    const isHair = (c) => {
+      if (!c) return false;
+      const d = Math.hypot(c[0] - med[0], c[1] - med[1], c[2] - med[2]);
+      const lum = (c[0] + c[1] + c[2]) / 3, ml = (med[0] + med[1] + med[2]) / 3;
+      return d < 52 + ml * 0.12 && Math.abs(lum - ml) < 55;
+    };
+    // the hair's width on each row of the back shot, centred near the spine
+    const rowHair = (v, cu, y, half) => {
+      let a = null, b = null;
+      for (let u = cu; u >= cu - half; u -= 0.004) { if (isHair(px(v, u, y))) a = u; else if (a != null && cu - u > 0.02) break; }
+      for (let u = cu; u <= cu + half; u += 0.004) { if (isHair(px(v, u, y))) b = u; else if (b != null && u - cu > 0.02) break; }
+      return a != null && b != null && b - a > 0.025 ? [a, b] : null;
+    };
+    const rows = [];
+    let miss = 0;
+    for (let y = eyeY; y > hipY + 0.02; y -= 0.012) {
+      const r = rowHair(back, bu, y, Math.max(headW * 0.8, sw * 0.75));
+      if (!r) { if (++miss >= 2) break; continue; }
+      miss = 0;
+      rows.push({ y, w: r[1] - r[0], cx: -(r[0] + r[1]) / 2 });
+    }
+    const endY = rows.length ? rows[rows.length - 1].y : eyeY;
+    const out = [];
+    // cap over the crown and the back of the head
+    {
+      const top = chinY + headH, cy = (top + chinY) / 2, ry = headH / 2;
+      const y0 = eyeY + 0.012;
+      const pts = [];
+      const n = 12;
+      for (let i = 0; i <= n; i++) {
+        const f = 0.5 - 0.5 * Math.cos((i / n) * Math.PI);
+        const y = y0 + f * (top + 0.008 - y0);
+        const e = Math.sqrt(Math.max(0.0004, 1 - Math.pow((y - cy) / (ry + 0.008), 2)));
+        pts.push({ p: new THREE.Vector3(headX, y, -0.006), rx: (headW / 2 + 0.008) * e, rz: (headD / 2 + 0.008) * e });
+      }
+      out.push({ ...tube(pts, true, false), bones: [['head', V(J.shMid), new THREE.Vector3(headX, topY, 0)]] });
+    }
+    // the length that falls down the back
+    if (endY < chinY + 0.02) {
+      const depthAt = (y) => (y > chinY ? headD : y > shY ? 0.07 * k : clamp(sideWidth(y) ?? 0.18, 0.12, 0.3));
+      const pts = [];
+      const step = Math.max(1, Math.floor(rows.length / 14));
+      for (let i = 0; i < rows.length; i += step) {
+        const r = rows[i];
+        const th = r.y > shY ? 0.024 : 0.019;
+        const w = clamp(r.w, 0.05, Math.max(headW * 1.15, sw * 1.1));
+        pts.push({ p: new THREE.Vector3(r.cx, r.y, -depthAt(r.y) / 2 - th * 0.4), rx: w / 2, rz: th });
+      }
+      // taper to the tips
+      const lastR = rows[rows.length - 1];
+      pts.push({ p: new THREE.Vector3(lastR.cx, endY - 0.015, -depthAt(endY) / 2 - 0.006), rx: Math.min(lastR.w, 0.2) * 0.35, rz: 0.008 });
+      if (pts.length >= 2) out.push({ ...tube(pts, false, true), bones: [['head', V(J.shMid), new THREE.Vector3(headX, topY, 0)], ['spine', V(J.hipMid), V(J.shMid)]] });
+    }
+    // strands that fall forward over the shoulders, seen in the front shot
+    for (const sd of [1, -1]) {
+      const pts = [];
+      let gone = 0;
+      for (let y = chinY + 0.01; y > hipY + 0.05; y -= 0.012) {
+        // look beside the neck, out to the shoulder
+        let a = null, b = null;
+        for (let u = headX + sd * 0.035; Math.abs(u - headX) < sw * 0.62; u += sd * 0.004) {
+          if (isHair(px(front, u, y))) { if (a == null) a = u; b = u; } else if (a != null && Math.abs(u - b) > 0.015) break;
+        }
+        if (a == null || Math.abs(b - a) < 0.015) { if (++gone >= 2) break; continue; }
+        gone = 0;
+        const d = clamp(sideWidth(y) ?? 0.16, 0.1, 0.28);
+        pts.push({ p: new THREE.Vector3((a + b) / 2, y, y > shY ? 0.01 : d / 2 + 0.006), rx: Math.abs(b - a) / 2, rz: 0.014 });
+      }
+      if (pts.length >= 3) {
+        // start inside the side of the head so the strand hangs from it
+        pts.unshift({ p: new THREE.Vector3(headX + sd * headW * 0.38, eyeY, 0), rx: 0.025, rz: 0.03 });
+        out.push({ ...tube(pts, false, true), bones: [['head', V(J.shMid), new THREE.Vector3(headX, topY, 0)], ['spine', V(J.hipMid), V(J.shMid)]] });
+      }
+    }
+    return { parts: out, length: endY };
+  }
+  if (hair) parts.push(...hair.parts);
   // --- lower body: from the hips down to where the outline splits into two legs ---
   // (just below the crotch in trousers, at the hem of a skirt or dress)
   const kneeY = (J[25].y + J[26].y) / 2;
@@ -266,7 +360,7 @@ export function fitBody(views, front) {
     g.dispose();
     ov += n; oi += part.idx.length;
   }
-  return { mesh: { positions, indices }, normals, skin: { si, sw: swt }, parts, J, skirt, backs: backs.length };
+  return { mesh: { positions, indices }, normals, skin: { si, sw: swt }, parts, J, skirt, backs: backs.length, hair: hair ? { parts: hair.parts.length, end: +hair.length.toFixed(3), eyeY: +eyeY.toFixed(3) } : null };
 }
 
 // Voxelise the fitted body (for the "can this camera see this point" test when painting)
