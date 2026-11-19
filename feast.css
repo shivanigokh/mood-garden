@@ -9,7 +9,7 @@ body.feast { background: #efe6da; }
   height: 100vh;
   object-fit: cover;
   transform: scaleX(-1); /* mirror, so moving right moves right */
-  filter: saturate(0.82) brightness(1.06) contrast(0.94) sepia(0.08);
+  filter: saturate(0.96) brightness(1.02);
 }
 
 #game {

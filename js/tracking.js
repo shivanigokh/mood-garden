@@ -154,7 +154,7 @@ export class Tracker {
       throw Object.assign(new Error('This browser does not support camera access.'), { code: 'unsupported' });
     }
     this.stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } },
+      video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
       audio: false,
     });
     this.video.srcObject = this.stream;
@@ -195,7 +195,11 @@ export class Tracker {
           this.lastVideoTime = vt;
           this._busy = true;
           this._busySince = nowMs;
-          createImageBitmap(this.video)
+          // the camera runs at HD for display; the models get a smaller copy so detection stays fast
+          const vw = this.video.videoWidth, vh = this.video.videoHeight;
+          const scale = Math.min(1, 640 / Math.max(vw, 1));
+          const opts = scale < 1 ? { resizeWidth: Math.round(vw * scale), resizeHeight: Math.round(vh * scale), resizeQuality: 'medium' } : undefined;
+          (opts ? createImageBitmap(this.video, opts).catch(() => createImageBitmap(this.video)) : createImageBitmap(this.video))
             .then((bitmap) => this.worker.postMessage({ type: 'frame', bitmap, ts: performance.now() }, [bitmap]))
             .catch(() => { this._busy = false; });
         } else if (this._busy && nowMs - this._busySince > 2000) {

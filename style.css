@@ -363,7 +363,7 @@ html, body {
   transform: scaleX(-1);
 }
 .mirror video {
-  filter: saturate(0.85) brightness(1.04) contrast(0.96);
+  filter: saturate(0.95) brightness(1.02);
   transition: opacity 0.6s;
 }
 .mirror figcaption {
