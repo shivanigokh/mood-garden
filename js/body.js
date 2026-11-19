@@ -49,6 +49,23 @@ class SmoothPose {
   get center() { const l = this.lm; return { x: (l[11].x + l[12].x) / 2, y: (l[11].y + l[12].y) / 2 }; }
 }
 
+// stretch a low-res body mask to the photo's size (bilinear)
+function upscaleMask(m, mw, mh, w, h) {
+  if (mw === w && mh === h) return m;
+  const out = new Float32Array(w * h);
+  const sx = mw / w, sy = mh / h;
+  for (let y = 0; y < h; y++) {
+    const fy = Math.min(mh - 1, Math.max(0, (y + 0.5) * sy - 0.5)), y0 = Math.floor(fy), y1 = Math.min(mh - 1, y0 + 1), ty = fy - y0;
+    for (let x = 0; x < w; x++) {
+      const fx = Math.min(mw - 1, Math.max(0, (x + 0.5) * sx - 0.5)), x0 = Math.floor(fx), x1 = Math.min(mw - 1, x0 + 1), tx = fx - x0;
+      const a = m[y0 * mw + x0] + (m[y0 * mw + x1] - m[y0 * mw + x0]) * tx;
+      const b = m[y1 * mw + x0] + (m[y1 * mw + x1] - m[y1 * mw + x0]) * tx;
+      out[y * w + x] = a + (b - a) * ty;
+    }
+  }
+  return out;
+}
+
 export class PoseTracker {
   constructor(video, opts = {}) {
     this.video = video;
@@ -83,7 +100,7 @@ export class PoseTracker {
 
   _loadWorker() {
     return new Promise((resolve, reject) => {
-      const w = (this.worker = new Worker(new URL('./pose-worker.js?v=9', import.meta.url)));
+      const w = (this.worker = new Worker(new URL('./pose-worker.js?v=10', import.meta.url)));
       const timer = setTimeout(() => reject(new Error('pose worker init timed out')), 45000);
       w.onerror = (e) => { clearTimeout(timer); reject(e.error || new Error(e.message || 'worker error')); };
       w.onmessage = (e) => {
@@ -93,7 +110,12 @@ export class PoseTracker {
         else if (d.type === 'result') {
           this._pending = d.landmarks || [];
           this._busy = false;
-          if (d.capture) { const cb = this._captures.get(d.capture.id); this._captures.delete(d.capture.id); cb?.(d.capture); }
+          if (d.capture) {
+            const c = d.capture, ph = this._capPhoto?.id === c.id ? this._capPhoto : null;
+            this._capPhoto = null;
+            if (!ph || !c.mask) this._capDone(c.id, null, c.err || (ph ? 'no body mask' : 'no photo'));
+            else this._capDone(c.id, { w: ph.w, h: ph.h, rgba: ph.rgba, mask: upscaleMask(c.mask, c.mw, c.mh, ph.w, ph.h), world: c.world, lm: c.lm });
+          }
         }
       };
       w.postMessage({ type: 'init', wasm: WASM_PATH, model: POSE_MODEL, numPoses: this.numPoses, masks: this.masks });
@@ -134,15 +156,23 @@ export class PoseTracker {
           const vw = this.video.videoWidth, vh = this.video.videoHeight;
           const cap = this._wantCapture;
           this._wantCapture = null;
-          if (cap) {
-            // full resolution for a scan capture so the texture stays sharp
-            createImageBitmap(this.video)
-              .then((bitmap) => this.worker.postMessage({ type: 'frame', bitmap, ts: performance.now(), capture: cap }, [bitmap]))
-              .catch(() => { this._busy = false; const cb = this._captures.get(cap); this._captures.delete(cap); cb?.(null); });
-            return this._finishUpdate(now);
-          }
           const scale = Math.min(1, 640 / Math.max(vw, 1));
           const o = scale < 1 ? { resizeWidth: Math.round(vw * scale), resizeHeight: Math.round(vh * scale), resizeQuality: 'medium' } : undefined;
+          if (cap) {
+            // a scan capture: keep the full-res photo here, and send the worker the same
+            // size frame it always sees (changing size mid-stream upsets some GPUs)
+            try {
+              const cv = document.createElement('canvas');
+              cv.width = vw; cv.height = vh;
+              const c2 = cv.getContext('2d', { willReadFrequently: true });
+              c2.drawImage(this.video, 0, 0, vw, vh);
+              this._capPhoto = { id: cap, w: vw, h: vh, rgba: c2.getImageData(0, 0, vw, vh).data };
+              (o ? createImageBitmap(cv, o).catch(() => createImageBitmap(cv)) : createImageBitmap(cv))
+                .then((bitmap) => this.worker.postMessage({ type: 'frame', bitmap, ts: performance.now(), capture: cap }, [bitmap]))
+                .catch((e) => { this._busy = false; this._capDone(cap, null, 'bitmap: ' + (e?.message || e)); });
+            } catch (e) { this._busy = false; this._capDone(cap, null, 'photo: ' + (e?.message || e)); }
+            return this._finishUpdate(now);
+          }
           (o ? createImageBitmap(this.video, o).catch(() => createImageBitmap(this.video)) : createImageBitmap(this.video))
             .then((bitmap) => this.worker.postMessage({ type: 'frame', bitmap, ts: performance.now() }, [bitmap]))
             .catch(() => { this._busy = false; });
@@ -162,8 +192,10 @@ export class PoseTracker {
             const c2 = cv.getContext('2d');
             c2.drawImage(this.video, 0, 0);
             const m = r.segmentationMasks?.[0];
-            const cap = { id, w, h, mask: m ? new Float32Array(m.getAsFloat32Array()) : null, rgba: c2.getImageData(0, 0, w, h).data, world: r.worldLandmarks?.[0] || null, lm: r.landmarks?.[0] || null };
-            const cb = this._captures.get(id); this._captures.delete(id); cb?.(cap);
+            let mk = null;
+            try { mk = m ? new Float32Array(m.getAsFloat32Array()) : null; } catch (e) { try { mk = Float32Array.from(m.getAsUint8Array(), (x) => x / 255); } catch (e2) { mk = null; } }
+            const cap = { id, w, h, mask: mk, rgba: c2.getImageData(0, 0, w, h).data, world: r.worldLandmarks?.[0] || null, lm: r.landmarks?.[0] || null };
+            this._capDone(id, cap.mask ? cap : null, cap.mask ? '' : 'no body mask');
           }
           r.segmentationMasks?.forEach((mm) => mm.close());
         } catch (e) { /* skip */ }
@@ -184,13 +216,21 @@ export class PoseTracker {
 
   // Ask for the next camera frame at full resolution with its body mask.
   // Resolves to { w, h, mask, rgba, world, lm } or null.
+  // On failure it resolves to null and sets this.captureError to the reason.
   capture() {
     const id = ++this._capId;
     return new Promise((resolve) => {
       this._captures.set(id, resolve);
       this._wantCapture = id;
-      setTimeout(() => { if (this._captures.has(id)) { this._captures.delete(id); if (this._wantCapture === id) this._wantCapture = null; resolve(null); } }, 3000);
+      setTimeout(() => { if (this._captures.has(id)) { if (this._wantCapture === id) this._wantCapture = null; this._capDone(id, null, 'timed out'); } }, 3000);
     });
+  }
+
+  _capDone(id, cap, err = '') {
+    const cb = this._captures.get(id);
+    this._captures.delete(id);
+    this.captureError = cap ? '' : err;
+    cb?.(cap);
   }
 
   // keep identities stable between frames by matching shoulder centres

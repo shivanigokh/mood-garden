@@ -10,7 +10,8 @@
 // or be put on a poster.
 
 import * as THREE from 'three';
-import { PoseTracker } from './body.js?v=9';
+import { PoseTracker } from './body.js?v=10';
+import { ScanCover } from './scan-cover.js?v=1';
 import { clamp01, ease, cameraErrorMessage, Sfx, setupToggle } from './shared.js?v=8';
 import * as S3 from './scan3d.js?v=9';
 
@@ -30,6 +31,7 @@ const statusEl = $('status');
 const statusText = statusEl.querySelector('.status-text');
 const mirror = $('mirror');
 const buildEl = $('build');
+const cover = new ScanCover($('cover'));
 
 const TAU = Math.PI * 2;
 const INK = '#1a0d2a';
@@ -295,6 +297,8 @@ function resetScan() {
   mirror.classList.remove('hidden');
   ['btn-mode', 'btn-look', 'btn-glb', 'btn-poster'].forEach((id) => ($(id).disabled = true));
   if (model) model.group.visible = false;
+  cover.reset();
+  $('cover-pct').textContent = '0%';
   $('btn-scan').textContent = 'Start turning';
   setTimeout(sizeScanCanvas, 750);
 }
@@ -339,14 +343,22 @@ function scanStep(dt, person) {
   } else if (scan.state === 'spinning') {
     const step = TAU / N_VIEWS;
     // the guide waits for slow captures so the angles stay true
-    if (lm && scan.guide < (scan.next + 1) * step) scan.guide = Math.min(TAU, scan.guide + (TAU / SPIN_SECONDS) * dt);
+    if (lm) scan.lastSeen = performance.now();
+    const seen = performance.now() - (scan.lastSeen || 0) < 1200;
+    if (seen && scan.guide < (scan.next + 1) * step) scan.guide = Math.min(TAU, scan.guide + (TAU / SPIN_SECONDS) * dt);
     const target = (scan.next / N_VIEWS) * TAU;
-    if (scan.next < N_VIEWS && scan.guide >= target && !scan.busy && lm) {
+    if (scan.next < N_VIEWS && scan.guide >= target && !scan.busy && seen) {
       scan.busy = true;
       const want = scan.next, at = scan.guide;
       tracker.capture().then((cap) => {
         scan.busy = false;
-        if (scan.state !== 'spinning' || scan.next !== want || !cap || !cap.mask || !cap.rgba || !cap.lm) return;
+        if (scan.state !== 'spinning' || scan.next !== want) return;
+        if (!cap || !cap.mask || !cap.rgba) { scan.fails = (scan.fails || 0) + 1; scan.err = tracker.captureError || 'unknown'; return; }
+        // a capture whose mask barely has a body in it is no use
+        let fg = 0; for (let i = 0; i < cap.mask.length; i += 7) if (cap.mask[i] > 0.5) fg++;
+        if (fg * 7 < cap.mask.length * 0.01) { scan.fails = (scan.fails || 0) + 1; scan.err = 'body mask came back empty'; return; }
+        scan.fails = 0;
+        try { cover.addCapture(cap, at); $('cover-pct').textContent = Math.round(cover.coverage() * 100) + '%'; } catch (e) { console.warn('coverage', e); }
         cap.theta = refineYaw(cap.world, Math.min(at, target + step));
         cap.nominal = at;
         scan.caps.push(cap);
@@ -356,7 +368,8 @@ function scanStep(dt, person) {
       });
     }
     const pct = Math.round((scan.caps.length / N_VIEWS) * 100);
-    setBanner(lm ? `Turn slowly to your left, follow the dot · ${pct}%` : 'Come back into view');
+    if (scan.fails >= 4) setBanner(`Camera capture is failing (${scan.err}) · ${pct}%`);
+    else setBanner(seen ? `Turn slowly to your left with the figure · shot ${scan.caps.length} of ${N_VIEWS}` : 'Come back into view');
   }
 }
 
@@ -391,7 +404,9 @@ async function build(caps) {
     const Wts = S3.viewWeights(mesh, normals, views, occ, RES, c);
     await step(0.92, 'Rigging your skeleton…');
     // the view closest to facing the camera gives the rest pose
-    const front = views.reduce((a, b) => (Math.abs(Math.sin(b.theta / 2)) < Math.abs(Math.sin(a.theta / 2)) ? b : a));
+    const withLm = views.filter((v) => v.lm);
+    if (!withLm.length) throw new Error('I never got a clear look at your pose. Try again with more light.');
+    const front = withLm.reduce((a, b) => (Math.abs(Math.sin(b.theta / 2)) < Math.abs(Math.sin(a.theta / 2)) ? b : a));
     buildModel(mesh, normals, Wts, views, atlasInfo, front);
     Object.assign(model, { atlasInfo, weights: Wts, meshData: mesh, normals, title: makeTitle(front), reveal: 0 });
     await step(1, 'Done');
@@ -445,36 +460,6 @@ function drawScanOverlay(person, t) {
     sctx.fillRect(0, y - 40 * DPR, cw, 40 * DPR);
     sctx.fillStyle = 'rgba(200, 255, 255, 0.95)';
     sctx.fillRect(0, y, cw, 2 * DPR);
-  }
-  if (spinning) {
-    // top-down turn guide: a ring, dots for captured angles, and the dot to follow.
-    // The canvas is mirrored like the video, so draw it un-mirrored for reading.
-    sctx.save();
-    sctx.translate(cw, 0);
-    sctx.scale(-1, 1);
-    const R = Math.min(cw, ch) * 0.12, cx = cw - R * 1.4 - 16 * DPR, cy = R * 1.4 + 16 * DPR;
-    sctx.fillStyle = 'rgba(26, 13, 42, 0.75)';
-    sctx.beginPath(); sctx.arc(cx, cy, R * 1.35, 0, TAU); sctx.fill();
-    sctx.strokeStyle = 'rgba(255,255,255,0.3)';
-    sctx.lineWidth = 6 * DPR;
-    sctx.beginPath(); sctx.arc(cx, cy, R, 0, TAU); sctx.stroke();
-    // seen from above with the camera at the bottom: turning to your left (mirror view) is clockwise
-    const ang = (a) => Math.PI / 2 + a;
-    for (let i = 0; i < scan.caps.length; i++) {
-      const a = ang((i / N_VIEWS) * TAU);
-      sctx.fillStyle = '#5ef0ff';
-      sctx.beginPath(); sctx.arc(cx + Math.cos(a) * R, cy + Math.sin(a) * R, 3.5 * DPR, 0, TAU); sctx.fill();
-    }
-    const a = ang(scan.guide);
-    sctx.fillStyle = '#ffcf3f';
-    sctx.beginPath(); sctx.arc(cx + Math.cos(a) * R, cy + Math.sin(a) * R, 8 * DPR, 0, TAU); sctx.fill();
-    sctx.translate(cx, cy);
-    sctx.rotate(a - Math.PI / 2);
-    sctx.fillStyle = '#fff';
-    sctx.beginPath(); sctx.ellipse(0, 0, R * 0.42, R * 0.2, 0, 0, TAU); sctx.fill();
-    sctx.fillStyle = '#ffcf3f';
-    sctx.beginPath(); sctx.arc(0, R * 0.12, R * 0.15, 0, TAU); sctx.fill();
-    sctx.restore();
   }
 }
 
@@ -798,6 +783,7 @@ function frame(now) {
     shadow.visible = true;
   } else shadow.visible = false;
   renderer.render(scene, camera);
+  if (mirror.classList.contains('big')) cover.render(scan.state === 'spinning' ? scan.guide : scan.state === 'waiting' ? Math.sin(t * 0.8) * 0.5 : cover.angle + rawDt * 0.6, t);
   drawScanOverlay(person, t);
 }
 

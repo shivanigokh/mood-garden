@@ -2,7 +2,7 @@
 // players side by side. MediaPipe Pose finds shoulders, arms, hands and head; the
 // camera fills the screen in true colour and the games are drawn on top.
 
-import { PoseTracker, makePose } from './body.js?v=9';
+import { PoseTracker, makePose } from './body.js?v=10';
 import { clamp01, clamp, lerp, ease, cameraErrorMessage, toScreen, Sfx, setupToggle } from './shared.js?v=8';
 
 const $ = (id) => document.getElementById(id);

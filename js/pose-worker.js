@@ -43,27 +43,21 @@ self.onmessage = async (e) => {
     const ts = Math.max(d.ts, lastTs + 1);
     lastTs = ts;
     let r = null;
-    try { r = pose.detectForVideo(bmp, ts); } catch (err) { /* skip a bad frame */ }
+    let detErr = '';
+    try { r = pose.detectForVideo(bmp, ts); } catch (err) { detErr = String(err?.message || err); }
     const msg = { type: 'result', landmarks: r ? r.landmarks : null };
     const transfer = [];
     if (d.capture) {
-      // a scan capture: hand back the full frame, its body mask and 3D landmarks
-      const w = bmp.width, h = bmp.height;
-      let mask = null;
-      try {
-        const m = r?.segmentationMasks?.[0];
-        if (m) { mask = new Float32Array(m.getAsFloat32Array()); }
-      } catch (err) { mask = null; }
-      let rgba = null;
-      try {
-        const oc = new OffscreenCanvas(w, h);
-        const oc2 = oc.getContext('2d');
-        oc2.drawImage(bmp, 0, 0);
-        rgba = oc2.getImageData(0, 0, w, h).data;
-      } catch (err) { rgba = null; }
-      msg.capture = { id: d.capture, w, h, mask, rgba, world: r?.worldLandmarks?.[0] || null, lm: r?.landmarks?.[0] || null };
+      // a scan capture: hand back this frame's body mask and 3D landmarks
+      let mask = null, err = r ? '' : 'pose failed: ' + detErr;
+      const m = r?.segmentationMasks?.[0];
+      if (m) {
+        try { mask = new Float32Array(m.getAsFloat32Array()); } catch (e1) {
+          try { mask = Float32Array.from(m.getAsUint8Array(), (x) => x / 255); } catch (e2) { err = 'mask read: ' + (e1?.message || e1); }
+        }
+      } else if (r) err = 'no person in this frame';
+      msg.capture = { id: d.capture, mw: m?.width || bmp.width, mh: m?.height || bmp.height, mask, err, world: r?.worldLandmarks?.[0] || null, lm: r?.landmarks?.[0] || null };
       if (mask) transfer.push(mask.buffer);
-      if (rgba) transfer.push(rgba.buffer);
     }
     try { r?.segmentationMasks?.forEach((m) => m.close()); } catch (err) { /* already closed */ }
     bmp.close();
