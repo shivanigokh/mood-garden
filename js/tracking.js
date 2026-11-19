@@ -42,6 +42,7 @@ export class Tracker {
   constructor(video, opts = {}) {
     this.video = video;
     this.useFace = opts.face !== false;
+    this.useHands = opts.hands !== false;
     this.face = null;
     this.hands = null;
     this.stream = null;
@@ -105,7 +106,7 @@ export class Tracker {
 
   _loadWorker() {
     return new Promise((resolve, reject) => {
-      const w = (this.worker = new Worker(new URL('./tracker-worker.js?v=5', import.meta.url)));
+      const w = (this.worker = new Worker(new URL('./tracker-worker.js?v=6', import.meta.url)));
       const timer = setTimeout(() => reject(new Error('worker init timed out')), 45000);
       w.onerror = (e) => { clearTimeout(timer); reject(e.error || new Error(e.message || 'worker error')); };
       w.onmessage = (e) => {
@@ -114,7 +115,7 @@ export class Tracker {
         else if (d.type === 'error') { clearTimeout(timer); reject(new Error(d.message)); }
         else if (d.type === 'result') { this._pending = d; this._busy = false; }
       };
-      w.postMessage({ type: 'init', face: this.useFace, wasm: WASM_PATH, faceModel: FACE_MODEL, handModel: HAND_MODEL });
+      w.postMessage({ type: 'init', face: this.useFace, hands: this.useHands, wasm: WASM_PATH, faceModel: FACE_MODEL, handModel: HAND_MODEL });
     });
   }
 
@@ -139,7 +140,7 @@ export class Tracker {
         minFacePresenceConfidence: 0.5,
         minTrackingConfidence: 0.5,
       }),
-      make(HandLandmarker, {
+      !this.useHands ? null : make(HandLandmarker, {
         baseOptions: { modelAssetPath: HAND_MODEL },
         runningMode: 'VIDEO',
         numHands: 2,
@@ -216,8 +217,8 @@ export class Tracker {
         this.frame++;
         try {
           // alternate the two models so no single frame does both
-          if (this.face && this.frame % 2 === 0) faceResult = this.face.detectForVideo(this.video, nowMs);
-          else handResult = this.hands.detectForVideo(this.video, nowMs);
+          if (this.face && (this.frame % 2 === 0 || !this.hands)) faceResult = this.face.detectForVideo(this.video, nowMs);
+          else if (this.hands) handResult = this.hands.detectForVideo(this.video, nowMs);
         } catch (e) {
           console.warn('detect failed', e);
         }
@@ -234,6 +235,7 @@ export class Tracker {
     if (lm) {
       const bs = {};
       for (const c of faceResult.faceBlendshapes?.[0]?.categories ?? []) bs[c.categoryName] = c.score;
+      this.lastBlend = bs;
       this._processFace(lm, bs, nowMs, out);
     }
     if (!this._hasFace || !this.running) {

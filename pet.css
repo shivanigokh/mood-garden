@@ -1,0 +1,57 @@
+/* Mirror pet. Builds on style.css. */
+
+body.pet { background: #e9efe4; }
+
+#room {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  display: block;
+  cursor: pointer;
+}
+
+body.pet .mirror { background: #2b302c; }
+
+.pet-mood {
+  position: absolute;
+  left: 50%;
+  top: 74px;
+  transform: translateX(-50%);
+  margin: 0;
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 24px;
+  letter-spacing: 0.04em;
+  color: rgba(46, 58, 50, 0.75);
+  transition: opacity 0.5s;
+  pointer-events: none;
+}
+.pet-mood:empty { opacity: 0; }
+
+.hint {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  margin: 0;
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 8px 16px;
+  border-radius: 14px;
+  background: rgba(250, 247, 240, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  font-size: 13px;
+  line-height: 1.45;
+  color: #2f3b33;
+  text-align: center;
+  transition: opacity 0.4s;
+}
+.hint:empty { opacity: 0; visibility: hidden; }
+
+#btn-mirror[aria-pressed="true"], #btn-guide[aria-pressed="true"] { background: rgba(255, 252, 245, 0.75); }
+
+@media (max-width: 560px) {
+  .hint { bottom: 64px; }
+  .pet-mood { top: 24px; font-size: 20px; }
+}

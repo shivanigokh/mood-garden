@@ -1,0 +1,42 @@
+/* Shadow puppets: a lamp-lit wall. Builds on style.css. */
+
+body.shadows { background: #2a2420; }
+
+#wall {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  display: block;
+}
+
+/* the camera inset shows true colour: no filters */
+body.shadows .mirror { background: #1d1a17; }
+
+body.shadows .modes { background: rgba(250, 244, 230, 0.5); }
+
+.hint {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  margin: 0;
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 8px 16px;
+  border-radius: 14px;
+  background: rgba(250, 244, 230, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  font-size: 13px;
+  line-height: 1.45;
+  color: #3a322b;
+  text-align: center;
+  transition: opacity 0.4s;
+}
+.hint:empty { opacity: 0; visibility: hidden; }
+
+#btn-mirror[aria-pressed="true"], #btn-guide[aria-pressed="true"] { background: rgba(255, 252, 245, 0.75); }
+
+@media (max-width: 560px) {
+  .hint { bottom: 64px; }
+}

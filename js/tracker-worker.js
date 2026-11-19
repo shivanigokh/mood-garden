@@ -35,7 +35,7 @@ self.onmessage = async (e) => {
           minFacePresenceConfidence: 0.5,
           minTrackingConfidence: 0.5,
         }) : Promise.resolve({ task: null, delegate: null }),
-        create(HandLandmarker, fileset, {
+        d.hands === false ? Promise.resolve({ task: null, delegate: null }) : create(HandLandmarker, fileset, {
           baseOptions: { modelAssetPath: d.handModel },
           runningMode: 'VIDEO',
           numHands: 2,
@@ -60,7 +60,7 @@ self.onmessage = async (e) => {
     let fr = null, hr = null;
     try {
       if (face) fr = face.detectForVideo(bmp, ts);
-      hr = hands.detectForVideo(bmp, ts);
+      if (hands) hr = hands.detectForVideo(bmp, ts);
     } catch (err) {
       // keep going; one bad frame shouldn't stop tracking
     }

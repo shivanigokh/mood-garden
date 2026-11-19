@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Mirror Pet · Mood Garden</title>
+  <meta name="description" content="Pip, a little creature that copies your face: it smiles, winks, pouts and puffs up with you. Face tracking runs on your device." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Inter:wght@300;400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css?v=6" />
+  <link rel="stylesheet" href="pet.css?v=6" />
+</head>
+<body class="pet">
+  <nav class="modes" aria-label="Experiences">
+    <a href="./">Garden</a>
+    <a href="feast.html">Feast</a>
+    <a href="studio.html">Studio</a>
+    <a href="shadows.html">Shadows</a>
+    <a href="pet.html" aria-current="page">Pet</a>
+  </nav>
+
+  <canvas id="room" aria-label="Pip, your mirror pet"></canvas>
+
+  <section id="landing" class="landing">
+    <div class="landing-inner">
+      <h1 class="title">MIRROR PET</h1>
+      <p class="subtitle">Pip copies every face you make.</p>
+      <button id="enter" class="enter">Wake Pip up</button>
+      <p id="landing-note" class="landing-note">
+        Smile, wink, pout, puff your cheeks or pull a grumpy face, and Pip does it back and reacts.
+        The camera is processed on this device and nothing is recorded or uploaded.
+      </p>
+    </div>
+  </section>
+
+  <div id="hud" class="hud" hidden>
+    <figure id="mirror" class="mirror">
+      <video id="cam" playsinline muted autoplay></video>
+    </figure>
+
+    <p id="mood" class="pet-mood" aria-live="polite"></p>
+    <p id="hint" class="hint"></p>
+
+    <div id="status" class="status" data-state="loading" role="status">
+      <span class="dot"></span><span class="status-text">starting camera…</span>
+    </div>
+
+    <nav class="controls" aria-label="Pet controls">
+      <button id="btn-mirror" class="ctl" title="Hide your camera" aria-label="Show or hide your camera view" aria-pressed="true">
+        <svg viewBox="0 0 24 24"><path d="M12 3.8c-4 0-6.6 3-6.6 7.2 0 4.6 3 9.2 6.6 9.2s6.6-4.6 6.6-9.2c0-4.2-2.6-7.2-6.6-7.2z"/><circle cx="9.4" cy="11" r=".7" fill="currentColor"/><circle cx="14.6" cy="11" r=".7" fill="currentColor"/><path d="M9.6 15.2c1.4 1.2 3.4 1.2 4.8 0"/></svg>
+      </button>
+      <button id="btn-audio" class="ctl" title="Sound" aria-label="Toggle sound" aria-pressed="true">
+        <svg viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path class="wave" d="M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a7.8 7.8 0 0 1 0 11"/><path class="slash" d="M15.5 9.5l5 5M20.5 9.5l-5 5"/></svg>
+      </button>
+      <button id="btn-guide" class="ctl" title="What Pip reacts to" aria-label="Show or hide the guide" aria-pressed="true">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9.8 9.6a2.3 2.3 0 1 1 3.2 2.1c-.7.3-1 .8-1 1.5v.6"/><circle cx="12" cy="16.6" r=".6" fill="currentColor"/></svg>
+      </button>
+    </nav>
+
+    <aside id="guide" class="guide" aria-label="What Pip reacts to">
+      <h2>Pip copies you</h2>
+      <ul>
+        <li><b>Tilt and turn</b> your head and Pip does too.</li>
+        <li><b>Blink or wink</b> and Pip winks back.</li>
+        <li><b>Open your mouth</b> and so does Pip.</li>
+      </ul>
+      <h2>And reacts</h2>
+      <ul>
+        <li><b>Smile</b> blushes and bounces. Laugh for giggles.</li>
+        <li><b>Raise your brows</b> with an open mouth: surprise!</li>
+        <li><b>Frown</b> and Pip gets sad and teary.</li>
+        <li><b>Scowl</b> and Pip turns red and steams.</li>
+        <li><b>Pout a kiss</b> for hearts.</li>
+        <li><b>Puff your cheeks</b> and Pip puffs up.</li>
+        <li><b>Look away</b> for a while and Pip dozes off.</li>
+        <li><b>Click Pip</b> for a boop.</li>
+      </ul>
+      <button id="guide-hide" class="text-link small">hide</button>
+    </aside>
+  </div>
+
+  <script type="module" src="js/pet.js?v=6"></script>
+</body>
+</html>

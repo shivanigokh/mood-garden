@@ -57,7 +57,7 @@ Controls (top right): show/hide your face view, camera on/off, ambient sound on/
 
 ## Feast (the food game)
 
-Use the **Garden / Feast / Studio** switch at the top of the page to open **Feast**, a second face-controlled experience. Food falls, drifts and gets tossed in from the sides over your mirrored camera view. Move your head to put your mouth under it and **open your mouth** to eat it.
+Use the **Garden / Feast / Studio / Shadows / Pet** switch at the top of the page to open **Feast**, a second face-controlled experience. Food falls, drifts and gets tossed in from the sides over your mirrored camera view. Move your head to put your mouth under it and **open your mouth** to eat it.
 
 - A ring follows your mouth. It turns gold when your mouth is open, which is when you can catch food.
 - Catch treats quickly one after another to build a combo (up to ×6). 🌟 is worth 50.
@@ -78,12 +78,32 @@ The game runs on the same on-device tracker as the garden, so nothing is uploade
 
 The hand button in the top right hides or shows the hand outlines. All sound is synthesised live with Web Audio. There are no samples.
 
+## Shadows (hand shadow puppets)
+
+**Shadows** turns the screen into a lamp-lit wall. Your hands cast shadows on it, and certain shapes come alive when you hold them still for about a second:
+
+| Shape | Animal |
+| --- | --- |
+| Index and little finger up, middle fingers tucked | **Dog** |
+| Two fingers up in a V | **Rabbit** |
+| Thumb and little finger out, the rest curled | **Cat** |
+| Both hands open, thumbs hooked together | **Bird** |
+
+Once an animal jumps off your hand, it plays with it. It runs over to your hand and follows it along the floor. Hold your hand low and it sniffs it; stroke over it with an open hand to pet it (hearts, wagging, purring). Hold your hand higher and it jumps for it. A cat swats at a fingertip held close to its face. Birds fly to your hand and perch on a still, pointing finger. A fast swipe startles everyone. Up to six animals share the wall; the reset button sends them home.
+
+## Mirror Pet
+
+**Pet** is Pip, a small fluffy creature who copies your face: head tilt and turn, each eye separately (so it winks back), and your mouth. Pip also reacts to your expressions. A smile makes it blush and bounce, laughing makes it giggle, and raised brows with an open mouth surprise it. A frown makes it teary under a little rain cloud, a scowl turns it red and steaming, and a kiss pout sends hearts. Puffed cheeks make it puff up. Look away for a while and Pip falls asleep, then wakes up when you come back. Click Pip for a boop.
+
 ## How it works
 
 ```
 index.html      the garden: landing screen, HUD, guide
 feast.html      the food game (feast.css, js/feast.js)
 studio.html     hand-played instruments (studio.css, js/studio.js)
+shadows.html    hand shadow puppets (shadows.css, js/shadows.js)
+pet.html        Pip the mirror pet (pet.css, js/pet.js)
+js/shared.js    small helpers and a creature-sound synth for Shadows and Pet
 style.css       visual styling (no frameworks)
 js/main.js      app wiring: camera flow, UI, main loop, events
 js/tracking.js  camera, expression maths, smoothing, gesture detection
