@@ -1,5 +1,5 @@
-import { Garden } from './garden.js?v=7';
-import { Ambience } from './audio.js?v=7';
+import { Garden } from './garden.js?v=8';
+import { Ambience } from './audio.js?v=8';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('scene');
@@ -87,7 +87,7 @@ function enterGarden() {
 async function startCamera() {
   setStatus('loading', 'starting camera…');
   if (!tracker) {
-    const [{ Tracker }, vision] = await Promise.all([import('./tracking.js?v=7'), import('../vendor/mediapipe/vision_bundle.mjs')]);
+    const [{ Tracker }, vision] = await Promise.all([import('./tracking.js?v=8'), import('../vendor/mediapipe/vision_bundle.mjs')]);
     tracker = new Tracker(video);
     CONN = {
       tess: vision.FaceLandmarker.FACE_LANDMARKS_TESSELATION,

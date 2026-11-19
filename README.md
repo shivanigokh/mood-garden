@@ -105,6 +105,19 @@ The silhouettes are built from smooth tapered curves with real walk cycles (two-
 
 On top of that Pip reacts. A big smile brings blushes, hearts and bounces, and a laugh gets giggles. Surprise makes it jump, sadness brings tears and a little rain cloud, and a scowl makes it go red and steam. A kiss pout sends hearts. Look away and Pip falls asleep, then wakes up when you come back. Click Pip for a boop.
 
+## Party (motion minigames)
+
+**Party** is a set of four original minigames you play with your whole body, for one player or two standing side by side (two people in view becomes a head-to-head). MediaPipe Pose tracks shoulders, arms, hands and head; the camera fills the screen in true colour and the games are drawn over you.
+
+| Game | How you play |
+| --- | --- |
+| Balloon Burst | Pop rising balloons with your hands. Gold is worth 3; grumpy storm clouds cost 2. |
+| Pump Dash | Pump your arms up and down to sprint against three rival runners. Hand speed is your running speed. |
+| Duck & Dodge | Move your head to catch coins and stars and avoid falling rocks. A red stripe flashing at head height zaps a moment later, so duck or stand tall. |
+| Strike a Pose | A wall rushes toward you with a pose on it. Match the glowing arm outline (it turns green when you're close) for OK, Good or Perfect. |
+
+Play all four as a party (stars per game, a final title or a champion's crown) or pick one. Raise both hands above your head to start or continue without touching anything. Best scores stay in your browser.
+
 ## How it works
 
 ```
@@ -113,6 +126,9 @@ feast.html      the food game (feast.css, js/feast.js)
 studio.html     hand-played instruments (studio.css, js/studio.js)
 shadows.html    hand shadow puppets (shadows.css, js/shadows.js)
 pet.html        Pip the mirror pet (pet.css, js/pet.js)
+party.html      motion minigames (party.css, js/party.js)
+js/body.js      full-body tracking (MediaPipe Pose) with one-euro smoothing
+js/pose-worker.js  runs the pose model in a Web Worker
 js/shared.js    small helpers and a creature-sound synth for Shadows and Pet
 js/puppets.js   shadow-puppet silhouettes and their animation rigs
 style.css       visual styling (no frameworks)
@@ -122,7 +138,7 @@ js/tracker-worker.js  runs the MediaPipe models in a Web Worker
 js/garden.js    Three.js world: meadow, grass shader, instanced flowers, trees, weather
 js/audio.js     generative Web Audio ambience (no audio files)
 vendor/         three.module.min.js (r170), @mediapipe/tasks-vision 0.10.14
-models/         face_landmarker.task, hand_landmarker.task
+models/         face_landmarker.task, hand_landmarker.task, pose_landmarker_lite.task
 ```
 
 **Expression detection.** Each signal combines face-mesh geometry with MediaPipe's blendshape scores, measured relative to a personal baseline captured when your face first appears (and slowly re-adapted while you're neutral):

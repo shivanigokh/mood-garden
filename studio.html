@@ -8,8 +8,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300&family=Inter:wght@300;400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=7" />
-  <link rel="stylesheet" href="studio.css?v=7" />
+  <link rel="stylesheet" href="style.css?v=8" />
+  <link rel="stylesheet" href="studio.css?v=8" />
 </head>
 <body class="studio">
   <nav class="modes" aria-label="Experiences">
@@ -18,7 +18,11 @@
     <a href="studio.html" aria-current="page">Studio</a>
     <a href="shadows.html">Shadows</a>
     <a href="pet.html">Pet</a>
+    <a href="party.html">Party</a>
+    <a href="tank.html">Tank</a>
+    <a href="avatar.html">Avatar</a>
   </nav>
+  <script>document.querySelector('.modes [aria-current]')?.scrollIntoView({ inline: 'center', block: 'nearest' });</script>
 
   <video id="cam" class="studio-video" playsinline muted autoplay></video>
   <canvas id="stage" aria-label="Instrument"></canvas>
@@ -55,6 +59,6 @@
     </nav>
   </div>
 
-  <script type="module" src="js/studio.js?v=7"></script>
+  <script type="module" src="js/studio.js?v=8"></script>
 </body>
 </html>

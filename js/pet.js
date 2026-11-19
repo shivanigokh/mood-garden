@@ -4,9 +4,9 @@
 // Pip's face continuously, with light low-latency smoothing. Head pose comes straight
 // from the landmarks. Little reactions (hearts, tears, steam, sparkles) play on top.
 
-import { Tracker } from './tracking.js?v=7';
-import { clamp01, clamp, lerp, ease, cameraErrorMessage, Sfx, setupToggle } from './shared.js?v=7';
-import { tube } from './puppets.js?v=7';
+import { Tracker } from './tracking.js?v=8';
+import { clamp01, clamp, lerp, ease, cameraErrorMessage, Sfx, setupToggle } from './shared.js?v=8';
+import { tube } from './puppets.js?v=8';
 
 const $ = (id) => document.getElementById(id);
 const video = $('cam');

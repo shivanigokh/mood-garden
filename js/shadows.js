@@ -4,9 +4,9 @@
 // stroke, swats, snaps, rears up or perches, and startles at a fast swipe.
 // Hand tracking: MediaPipe Hand Landmarker, on-device. Sound: Web Audio.
 
-import { Tracker } from './tracking.js?v=7';
-import { clamp01, clamp, lerp, ease, cameraErrorMessage, toScreen, Sfx, setupToggle } from './shared.js?v=7';
-import { DRAW, SIZE, NAMES, FLIERS, restPose, tube } from './puppets.js?v=7';
+import { Tracker } from './tracking.js?v=8';
+import { clamp01, clamp, lerp, ease, cameraErrorMessage, toScreen, Sfx, setupToggle } from './shared.js?v=8';
+import { DRAW, SIZE, NAMES, FLIERS, restPose, tube } from './puppets.js?v=8';
 
 const $ = (id) => document.getElementById(id);
 const video = $('cam');

@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Party · Mood Garden</title>
+  <meta name="description" content="Motion party minigames for one or two players: pop balloons, sprint by pumping your arms, duck and dodge, and strike poses. Body tracking runs on your device." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Fredoka:wght@400;500;600;700&family=Inter:wght@300;400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css?v=8" />
+  <link rel="stylesheet" href="party.css?v=8" />
+</head>
+<body class="party">
+  <nav class="modes" aria-label="Experiences">
+    <a href="./">Garden</a>
+    <a href="feast.html">Feast</a>
+    <a href="studio.html">Studio</a>
+    <a href="shadows.html">Shadows</a>
+    <a href="pet.html">Pet</a>
+    <a href="party.html" aria-current="page">Party</a>
+    <a href="tank.html">Tank</a>
+    <a href="avatar.html">Avatar</a>
+  </nav>
+  <script>document.querySelector('.modes [aria-current]')?.scrollIntoView({ inline: 'center', block: 'nearest' });</script>
+
+  <video id="cam" class="stage-cam" playsinline muted autoplay></video>
+  <canvas id="fx" aria-label="Party game"></canvas>
+
+  <section id="landing" class="landing party-landing">
+    <div class="landing-inner">
+      <h1 class="party-title"><span>M</span><span>O</span><span>T</span><span>I</span><span>O</span><span>N</span> <span>P</span><span>A</span><span>R</span><span>T</span><span>Y</span></h1>
+      <p class="party-sub">Four minigames you play with your whole body. One player, or two side by side.</p>
+      <button id="enter" class="party-btn">Let’s party</button>
+      <p id="landing-note" class="landing-note">
+        Stand back so the camera can see you from the waist up. Body tracking runs on this device and nothing is recorded or uploaded.
+      </p>
+    </div>
+  </section>
+
+  <div id="hud" class="hud" hidden>
+    <header id="bar" class="party-bar" hidden>
+      <span id="bar-game" class="bar-game"></span>
+      <span id="bar-time" class="bar-time"></span>
+      <span id="bar-scores" class="bar-scores"></span>
+    </header>
+
+    <div id="card" class="party-card" hidden></div>
+
+    <p id="hint" class="hint party-hint"></p>
+
+    <div id="status" class="status" data-state="loading" role="status">
+      <span class="dot"></span><span class="status-text">starting camera…</span>
+    </div>
+
+    <nav class="controls" aria-label="Party controls">
+      <button id="btn-menu" class="ctl" title="Back to the game menu" aria-label="Back to the game menu">
+        <svg viewBox="0 0 24 24"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/></svg>
+      </button>
+      <button id="btn-audio" class="ctl" title="Sound" aria-label="Toggle sound" aria-pressed="true">
+        <svg viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path class="wave" d="M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a7.8 7.8 0 0 1 0 11"/><path class="slash" d="M15.5 9.5l5 5M20.5 9.5l-5 5"/></svg>
+      </button>
+    </nav>
+  </div>
+
+  <script type="module" src="js/party.js?v=8"></script>
+</body>
+</html>

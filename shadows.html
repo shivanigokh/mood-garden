@@ -8,8 +8,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Inter:wght@300;400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=7" />
-  <link rel="stylesheet" href="shadows.css?v=7" />
+  <link rel="stylesheet" href="style.css?v=8" />
+  <link rel="stylesheet" href="shadows.css?v=8" />
 </head>
 <body class="shadows">
   <nav class="modes" aria-label="Experiences">
@@ -18,7 +18,11 @@
     <a href="studio.html">Studio</a>
     <a href="shadows.html" aria-current="page">Shadows</a>
     <a href="pet.html">Pet</a>
+    <a href="party.html">Party</a>
+    <a href="tank.html">Tank</a>
+    <a href="avatar.html">Avatar</a>
   </nav>
+  <script>document.querySelector('.modes [aria-current]')?.scrollIntoView({ inline: 'center', block: 'nearest' });</script>
 
   <canvas id="wall" aria-label="Shadow puppet wall"></canvas>
 
@@ -99,6 +103,6 @@
     </div>
   </div>
 
-  <script type="module" src="js/shadows.js?v=7"></script>
+  <script type="module" src="js/shadows.js?v=8"></script>
 </body>
 </html>

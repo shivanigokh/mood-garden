@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Inter:wght@300;400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=7" />
+  <link rel="stylesheet" href="style.css?v=8" />
   <script type="importmap">
     { "imports": { "three": "./vendor/three.module.min.js" } }
   </script>
@@ -20,7 +20,11 @@
     <a href="studio.html">Studio</a>
     <a href="shadows.html">Shadows</a>
     <a href="pet.html">Pet</a>
+    <a href="party.html">Party</a>
+    <a href="tank.html">Tank</a>
+    <a href="avatar.html">Avatar</a>
   </nav>
+  <script>document.querySelector('.modes [aria-current]')?.scrollIntoView({ inline: 'center', block: 'nearest' });</script>
 
   <canvas id="scene" aria-label="Mood Garden scene"></canvas>
   <div class="veil" aria-hidden="true"></div>
@@ -99,6 +103,6 @@
   <div id="toast" class="toast" role="alert" hidden></div>
 
 
-  <script type="module" src="js/main.js?v=7"></script>
+  <script type="module" src="js/main.js?v=8"></script>
 </body>
 </html>

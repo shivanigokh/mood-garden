@@ -106,7 +106,7 @@ export class Tracker {
 
   _loadWorker() {
     return new Promise((resolve, reject) => {
-      const w = (this.worker = new Worker(new URL('./tracker-worker.js?v=7', import.meta.url)));
+      const w = (this.worker = new Worker(new URL('./tracker-worker.js?v=8', import.meta.url)));
       const timer = setTimeout(() => reject(new Error('worker init timed out')), 45000);
       w.onerror = (e) => { clearTimeout(timer); reject(e.error || new Error(e.message || 'worker error')); };
       w.onmessage = (e) => {
