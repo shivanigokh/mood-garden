@@ -1,7 +1,7 @@
 // FEAST: steer with your head, open your mouth to eat the falling food.
 // Reuses the Mood Garden face tracker (MediaPipe, on-device, in a worker).
 
-import { Tracker } from './tracking.js?v=4';
+import { Tracker } from './tracking.js?v=5';
 
 const $ = (id) => document.getElementById(id);
 const video = $('cam');

@@ -24,8 +24,9 @@ self.onmessage = async (e) => {
   if (d.type === 'init') {
     try {
       const fileset = await FilesetResolver.forVisionTasks(d.wasm);
+      const wantFace = d.face !== false; // the music studio only needs hands
       const [f, h] = await Promise.all([
-        create(FaceLandmarker, fileset, {
+        wantFace ? create(FaceLandmarker, fileset, {
           baseOptions: { modelAssetPath: d.faceModel },
           runningMode: 'VIDEO',
           numFaces: 1,
@@ -33,7 +34,7 @@ self.onmessage = async (e) => {
           minFaceDetectionConfidence: 0.5,
           minFacePresenceConfidence: 0.5,
           minTrackingConfidence: 0.5,
-        }),
+        }) : Promise.resolve({ task: null, delegate: null }),
         create(HandLandmarker, fileset, {
           baseOptions: { modelAssetPath: d.handModel },
           runningMode: 'VIDEO',
@@ -45,7 +46,7 @@ self.onmessage = async (e) => {
       ]);
       face = f.task;
       hands = h.task;
-      self.postMessage({ type: 'ready', delegate: f.delegate });
+      self.postMessage({ type: 'ready', delegate: f.delegate || h.delegate });
     } catch (err) {
       self.postMessage({ type: 'error', message: String(err?.message || err) });
     }
@@ -58,7 +59,7 @@ self.onmessage = async (e) => {
     lastTs = ts;
     let fr = null, hr = null;
     try {
-      fr = face.detectForVideo(bmp, ts);
+      if (face) fr = face.detectForVideo(bmp, ts);
       hr = hands.detectForVideo(bmp, ts);
     } catch (err) {
       // keep going; one bad frame shouldn't stop tracking

@@ -57,7 +57,7 @@ Controls (top right): show/hide your face view, camera on/off, ambient sound on/
 
 ## Feast (the food game)
 
-Use the **Garden / Feast** switch at the top of the page to open **Feast**, a second face-controlled experience. Food falls, drifts and gets tossed in from the sides over your mirrored camera view. Move your head to put your mouth under it and **open your mouth** to eat it.
+Use the **Garden / Feast / Studio** switch at the top of the page to open **Feast**, a second face-controlled experience. Food falls, drifts and gets tossed in from the sides over your mirrored camera view. Move your head to put your mouth under it and **open your mouth** to eat it.
 
 - A ring follows your mouth. It turns gold when your mouth is open, which is when you can catch food.
 - Catch treats quickly one after another to build a combo (up to ×6). 🌟 is worth 50.
@@ -68,11 +68,22 @@ Use the **Garden / Feast** switch at the top of the page to open **Feast**, a se
 
 The game runs on the same on-device tracker as the garden, so nothing is uploaded.
 
+## Studio (hand music)
+
+**Studio** in the top switch turns your hands into instruments. It runs only the hand model, so it starts quickly. Turn your sound on, then pick an instrument at the bottom of the screen (or press **1**, **2** or **3**).
+
+- **Harmonium.** Hold up both hands, palms facing, as if holding the bellows. Move your hands apart and together to pump air. The faster you pump, the louder it plays, and it keeps sounding briefly after you stop, like real bellows. Raise or lower your hands to pick the note, shown as Sa Re Ga Ma Pa Dha Ni Sa down the right edge. A low Sa and Pa drone plays underneath.
+- **Air drums.** Strike down through a pad with your index fingertip: hi-hat, snare, kick, tom and crash. A harder, faster strike plays louder. Lift your hand to re-arm.
+- **Theremin.** Your right hand's height sets the pitch, sliding smoothly over three octaves. Your left hand's height sets the volume. With one hand, opening it makes the sound louder.
+
+The hand button in the top right hides or shows the hand outlines. All sound is synthesised live with Web Audio. There are no samples.
+
 ## How it works
 
 ```
 index.html      the garden: landing screen, HUD, guide
 feast.html      the food game (feast.css, js/feast.js)
+studio.html     hand-played instruments (studio.css, js/studio.js)
 style.css       visual styling (no frameworks)
 js/main.js      app wiring: camera flow, UI, main loop, events
 js/tracking.js  camera, expression maths, smoothing, gesture detection
