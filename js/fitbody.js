@@ -202,11 +202,22 @@ export function fitBody(views, front) {
       for (let u = cu; u <= cu + half; u += 0.004) { if (isHair(px(v, u, y))) b = u; else if (b != null && u - cu > 0.02) break; }
       return a != null && b != null && b - a > 0.025 ? [a, b] : null;
     };
+    // is your top the same colour as your hair? (then the two can't be told apart)
+    const chest = [];
+    for (let du = -0.03; du <= 0.03; du += 0.01) for (let dy = 0.06; dy <= 0.14; dy += 0.02) { const c = px(front, J.shMid.x + du, shY - dy); if (c) chest.push(c); }
+    const topLikeHair = chest.length > 4 && chest.filter(isHair).length > chest.length * 0.5;
     const rows = [];
     let miss = 0;
     for (let y = eyeY; y > hipY + 0.02; y -= 0.012) {
       const r = rowHair(back, bu, y, Math.max(headW * 0.8, sw * 0.75));
       if (!r) { if (++miss >= 2) break; continue; }
+      // below the shoulders, "hair" as wide as the whole back is really a top of the
+      // same colour: real hair down the back is narrower than you are
+      if (topLikeHair && y < shY - 0.05) break; // stop at the shoulders rather than run down the top
+      if (y < shY - 0.07) {
+        const body = runNear(back, y, bu, 0.03);
+        if (body && r[1] - r[0] > (body[1] - body[0]) * 0.9) break;
+      }
       miss = 0;
       rows.push({ y, w: r[1] - r[0], cx: -(r[0] + r[1]) / 2 });
     }
@@ -233,9 +244,14 @@ export function fitBody(views, front) {
       const step = Math.max(1, Math.floor(rows.length / 14));
       for (let i = 0; i < rows.length; i += step) {
         const r = rows[i];
-        const th = r.y > shY ? 0.024 : 0.019;
         const w = clamp(r.w, 0.05, Math.max(headW * 1.15, sw * 1.1));
-        pts.push({ p: new THREE.Vector3(r.cx, r.y, -depthAt(r.y) / 2 - th * 0.4), rx: w / 2, rz: th });
+        if (r.y > chinY) {
+          // around the head: a thick fall that sits partly inside the skull, so no gap shows
+          pts.push({ p: new THREE.Vector3(r.cx, r.y, -headD * 0.22), rx: Math.max(w / 2, headW * 0.5), rz: headD * 0.32 });
+        } else {
+          const th = r.y > shY ? 0.026 : 0.02;
+          pts.push({ p: new THREE.Vector3(r.cx, r.y, -depthAt(r.y) / 2 - th * 0.25), rx: w / 2, rz: th });
+        }
       }
       // taper to the tips
       const lastR = rows[rows.length - 1];
@@ -243,7 +259,8 @@ export function fitBody(views, front) {
       if (pts.length >= 2) out.push({ ...tube(pts, false, true), bones: [['head', V(J.shMid), new THREE.Vector3(headX, topY, 0)], ['spine', V(J.hipMid), V(J.shMid)]] });
     }
     // strands that fall forward over the shoulders, seen in the front shot
-    for (const sd of [1, -1]) {
+    // (skipped when your top is the same colour as your hair: they can't be told apart)
+    for (const sd of topLikeHair ? [] : [1, -1]) {
       const pts = [];
       let gone = 0;
       for (let y = chinY + 0.01; y > hipY + 0.05; y -= 0.012) {
@@ -252,7 +269,7 @@ export function fitBody(views, front) {
         for (let u = headX + sd * 0.035; Math.abs(u - headX) < sw * 0.62; u += sd * 0.004) {
           if (isHair(px(front, u, y))) { if (a == null) a = u; b = u; } else if (a != null && Math.abs(u - b) > 0.015) break;
         }
-        if (a == null || Math.abs(b - a) < 0.015) { if (++gone >= 2) break; continue; }
+        if (a == null || Math.abs(b - a) < 0.015 || Math.abs(b - a) > 0.08) { if (++gone >= 2) break; continue; }
         gone = 0;
         const d = clamp(sideWidth(y) ?? 0.16, 0.1, 0.28);
         pts.push({ p: new THREE.Vector3((a + b) / 2, y, y > shY ? 0.01 : d / 2 + 0.006), rx: Math.abs(b - a) / 2, rz: 0.014 });
@@ -263,7 +280,7 @@ export function fitBody(views, front) {
         out.push({ ...tube(pts, false, true), bones: [['head', V(J.shMid), new THREE.Vector3(headX, topY, 0)], ['spine', V(J.hipMid), V(J.shMid)]] });
       }
     }
-    return { parts: out, length: endY };
+    return { parts: out, length: endY, topLikeHair };
   }
   if (hair) parts.push(...hair.parts);
   // --- lower body: from the hips down to where the outline splits into two legs ---
