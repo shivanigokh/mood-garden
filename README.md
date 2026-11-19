@@ -118,6 +118,19 @@ On top of that Pip reacts. A big smile brings blushes, hearts and bounces, and a
 
 Play all four as a party (stars per game, a final title or a champion's crown) or pick one. Raise both hands above your head to start or continue without touching anything. Best scores stay in your browser.
 
+## Fish Tank
+
+**Tank** is an aquarium you play with your hands. Clownfish, a school of neon tetras, angelfish, fancy goldfish and puffers swim with real body waves, school with their own kind and keep out of each other's way, among swaying weed, coral, rocks and a treasure chest that breathes bubbles.
+
+| Gesture | What happens |
+| --- | --- |
+| Point one finger | Fish come to your fingertip and circle it, so you can lead them around. |
+| Pinch | Sprinkles food from the pinch. Fish race for the flakes, and get full after a few. |
+| Open hand | Pushes a current the way you move it, bending the weed and drifting the fish. |
+| Fast swipe | Scatters the fish. Puffers puff up. |
+
+No camera? Click to drop food and drag to stir. **Draw a fish** opens a sketch pad (colours, brush, fill, eraser, undo). Draw with the mouse or a finger, or pinch in the air to draw with your hand, name it and release it. Your drawing is sliced into strips that ride the same swimming wave as the other fish, it turns to face where it swims, and it stays in the tank (saved in this browser, up to 12).
+
 ## How it works
 
 ```
@@ -127,6 +140,7 @@ studio.html     hand-played instruments (studio.css, js/studio.js)
 shadows.html    hand shadow puppets (shadows.css, js/shadows.js)
 pet.html        Pip the mirror pet (pet.css, js/pet.js)
 party.html      motion minigames (party.css, js/party.js)
+tank.html       hand-played aquarium with drawn fish (tank.css, js/tank.js)
 js/body.js      full-body tracking (MediaPipe Pose) with one-euro smoothing
 js/pose-worker.js  runs the pose model in a Web Worker
 js/shared.js    small helpers and a creature-sound synth for Shadows and Pet
