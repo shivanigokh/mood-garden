@@ -14,7 +14,7 @@ import { PoseTracker } from './body.js?v=11';
 import { ScanCover } from './scan-cover.js?v=2';
 import { clamp01, ease, cameraErrorMessage, Sfx, setupToggle } from './shared.js?v=8';
 import * as S3 from './scan3d.js?v=10';
-import * as Fit from './fitbody.js?v=4';
+import * as Fit from './fitbody.js?v=6';
 
 const $ = (id) => document.getElementById(id);
 const video = $('cam');
@@ -106,16 +106,23 @@ const skinMat = new THREE.ShaderMaterial({
     cols: { value: 6 },
     rows: { value: 4 },
     toon: { value: 1 },
+    faceTex: { value: new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1) },
   },
   vertexShader: /* glsl */ `
     #include <common>
     #include <skinning_pars_vertex>
     ${wDecl}
+    attribute vec2 faceUV;
+    attribute float faceW;
+    varying vec2 vFaceUV;
+    varying float vFaceW;
     varying vec3 vRest;
     varying vec3 vN;
     varying vec3 vV;
     void main() {
       vRest = position;
+      vFaceUV = faceUV;
+      vFaceW = faceW;
       ${wCopy}
       #include <beginnormal_vertex>
       #include <skinbase_vertex>
@@ -133,6 +140,9 @@ const skinMat = new THREE.ShaderMaterial({
     uniform float cols;
     uniform float rows;
     uniform float toon;
+    uniform sampler2D faceTex;
+    varying vec2 vFaceUV;
+    varying float vFaceW;
     ${IDX.map((i) => `varying vec4 v${i};`).join('\n')}
     varying vec3 vRest;
     varying vec3 vN;
@@ -153,6 +163,8 @@ const skinMat = new THREE.ShaderMaterial({
         tw += w;
       }
       col /= max(tw, 1e-4);
+      // the close-up face photo, where there is one
+      if (vFaceW > 0.001) col = mix(col, texture2D(faceTex, vFaceUV).rgb, vFaceW);
       vec3 n = normalize(vN);
       vec3 L = normalize(vec3(-0.45, 0.55, 0.7));
       float ndl = dot(n, L);
@@ -196,7 +208,7 @@ let model = null;
 let mode = 'live'; // live | turntable
 let spinY = 0, dragV = 0;
 
-function buildModel(mesh, normals, W8, views, atlasInfo, front, skin = null) {
+function buildModel(mesh, normals, W8, views, atlasInfo, front, skin = null, face = null) {
   if (model) { rig.remove(model.group); model.geo.dispose(); }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
@@ -207,6 +219,15 @@ function buildModel(mesh, normals, W8, views, atlasInfo, front, skin = null) {
     const arr = new Float32Array(n * 4);
     for (let i = 0; i < n; i++) for (let k = 0; k < 4; k++) arr[i * 4 + k] = W8[i * 24 + a * 4 + k];
     geo.setAttribute('w' + a, new THREE.BufferAttribute(arr, 4));
+  }
+  geo.setAttribute('faceUV', new THREE.BufferAttribute(face ? face.uv : new Float32Array(n * 2), 2));
+  geo.setAttribute('faceW', new THREE.BufferAttribute(face ? face.w : new Float32Array(n), 1));
+  if (face) {
+    const ft = new THREE.CanvasTexture(face.canvas);
+    ft.colorSpace = THREE.NoColorSpace;
+    ft.generateMipmaps = false;
+    ft.minFilter = THREE.LinearFilter;
+    skinMat.uniforms.faceTex.value = ft;
   }
   // rig
   const J = S3.restJoints(front);
@@ -234,8 +255,8 @@ function buildModel(mesh, normals, W8, views, atlasInfo, front, skin = null) {
   const skel = new THREE.Skeleton(S3.BONES.map((b) => bones[b]));
   const tex = new THREE.CanvasTexture(atlasInfo.atlas);
   tex.colorSpace = THREE.NoColorSpace;
-  tex.minFilter = THREE.LinearMipmapLinearFilter;
-  tex.anisotropy = 4;
+  tex.generateMipmaps = false;
+  tex.minFilter = THREE.LinearFilter;
   skinMat.uniforms.atlas.value = tex;
   skinMat.uniforms.cols.value = atlasInfo.cols;
   skinMat.uniforms.rows.value = atlasInfo.rows;
@@ -365,16 +386,40 @@ function scanStep(dt, person) {
         scan.caps.push(cap);
         scan.next++;
         S.tick(scan.next / N_VIEWS);
-        if (scan.next >= N_VIEWS) build(scan.caps);
+        if (scan.next >= N_VIEWS) { scan.state = 'face'; scan.faceT = 0; scan.faceStart = performance.now(); $('btn-scan').textContent = 'Skip face photo'; S.go(); }
       });
     }
     const pct = Math.round((scan.caps.length / N_VIEWS) * 100);
     if (scan.fails >= 4) setBanner(`Camera capture is failing (${scan.err}) · ${pct}%`);
     else setBanner(seen ? `Arms slightly out, turn slowly left with the figure · ${scan.caps.length}/${N_VIEWS}` : 'Come back into view');
+  } else if (scan.state === 'face') {
+    // last step: a close-up so the face is sharp (from across the room it's tiny)
+    const vw = video.videoWidth || 1280, vh = video.videoHeight || 720;
+    let msg = 'Last step: walk up close to the camera and look straight at it';
+    let ok = false;
+    if (lm && lm[2].visibility > 0.5 && lm[5].visibility > 0.5 && lm[0].visibility > 0.5) {
+      const eyeD = Math.hypot((lm[2].x - lm[5].x) * vw, (lm[2].y - lm[5].y) * vh);
+      const midX = ((lm[2].x + lm[5].x) / 2) * vw;
+      if (eyeD < vw * 0.055) msg = 'Closer… your face should fill more of the camera';
+      else if (Math.abs(lm[0].x * vw - midX) > eyeD * 0.22) msg = 'Look straight at the camera';
+      else { ok = true; msg = 'Perfect, hold still…'; }
+    }
+    scan.faceT = ok ? scan.faceT + dt : 0;
+    setBanner(msg);
+    if (scan.faceT > 0.7 && !scan.busy) {
+      scan.busy = true;
+      tracker.capture().then((cap) => {
+        scan.busy = false;
+        if (scan.state !== 'face') return;
+        if (cap && cap.rgba && cap.lm) { S.shutter(); build(scan.caps, cap); }
+        else scan.faceT = 0;
+      });
+    }
+    if (performance.now() - scan.faceStart > 30000) build(scan.caps, null);
   }
 }
 
-async function build(caps) {
+async function build(caps, faceCap = null) {
   scan.state = 'building';
   setBanner('Building your 3D self');
   buildEl.hidden = false;
@@ -408,8 +453,10 @@ async function build(caps) {
     await step(0.7, 'Painting on your real colours…');
     const Wts = S3.viewWeights(mesh, normals, views, occ, ORES, c);
     await step(0.92, 'Rigging your skeleton…');
-    buildModel(mesh, normals, Wts, views, atlasInfo, front, fit.skin);
-    Object.assign(model, { atlasInfo, weights: Wts, meshData: mesh, normals, title: makeTitle(front), reveal: 0, fitInfo: { skirt: fit.skirt, hair: fit.hair } });
+    let face = null;
+    if (faceCap) { try { face = Fit.faceMap(fit, faceCap, front); } catch (e) { console.warn('face', e); } }
+    buildModel(mesh, normals, Wts, views, atlasInfo, front, fit.skin, face);
+    Object.assign(model, { atlasInfo, weights: Wts, meshData: mesh, normals, title: makeTitle(front), reveal: 0, fitInfo: { skirt: fit.skirt, hair: fit.hair, face: !!face }, face });
     await step(1, 'Done');
     scan.state = 'done';
     buildEl.hidden = true;
@@ -719,6 +766,17 @@ async function openPoster(newTitle) {
 
 function glbBlob() {
   const colors = S3.bakeColors(model.meshData, model.weights, model.views, model.atlasInfo.atlas);
+  const f = model.face;
+  if (f) {
+    const d = f.canvas.getContext('2d').getImageData(0, 0, 512, 512).data;
+    for (let i = 0; i < f.w.length; i++) {
+      const w = f.w[i];
+      if (!w) continue;
+      const x = Math.min(511, Math.floor(f.uv[i * 2] * 512)), y = Math.min(511, Math.floor((1 - f.uv[i * 2 + 1]) * 512));
+      const o = (y * 512 + x) * 4;
+      for (let k = 0; k < 3; k++) colors[i * 3 + k] = colors[i * 3 + k] * (1 - w) + (d[o + k] / 255) * w;
+    }
+  }
   return S3.toGLB(model.meshData.positions, model.normals, colors, model.meshData.indices);
 }
 function saveGLB() {
@@ -764,7 +822,7 @@ function frame(now) {
   if (tracker) tracker.update(now);
   const p = tracker?.people?.[0] || null;
   const person = p ? { lm: p.lm, raw: p.raw } : null;
-  if (tracker && (tracker.running || tracker.fake) && (scan.state === 'waiting' || scan.state === 'spinning')) scanStep(rawDt, person);
+  if (tracker && (tracker.running || tracker.fake) && (scan.state === 'waiting' || scan.state === 'spinning' || scan.state === 'face')) scanStep(rawDt, person);
   if (scan.state === 'done' && model) setBanner(model.title + (mode === 'live' ? ' <small>copies you live</small>' : ' <small>drag to spin</small>'));
   if (tracker?.running) setStatus(person ? 'active' : 'searching', person ? 'you’re in view' : 'looking for you');
 
@@ -825,6 +883,7 @@ $('btn-scan').addEventListener('click', () => {
   if (!tracker) return;
   // while waiting, the button starts the turn straight away (if it can see you at all)
   if (scan.state === 'waiting') { scan.force = true; return; }
+  if (scan.state === 'face') { build(scan.caps, null); return; }
   resetScan();
 });
 $('btn-poster').addEventListener('click', () => { sfx.init(); openPoster(false); });
@@ -859,7 +918,7 @@ enterBtn.addEventListener('click', async () => {
 window.avatar = {
   get scan() { return scan; },
   get model() { return model; },
-  build: (caps) => { scan = { state: 'spinning', caps }; return build(caps); },
+  build: (caps, faceCap) => { scan = { state: 'spinning', caps }; return build(caps, faceCap); },
   capture: () => tracker?.capture(),
   setMode,
   poseModel,

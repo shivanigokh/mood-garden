@@ -135,7 +135,9 @@ No camera? Click to drop food and drag to stir. **Draw a fish** opens a sketch p
 
 **Avatar** scans you into a rotatable, rigged 3D game character built from your real camera images. Stand back so the camera sees you head to toe, arms a little out from your sides, and hold still. Then turn slowly on the spot, all the way round to your left, following the guide (about 18 seconds). A capture is taken every 15° of turn, 24 in all, and each one keeps the camera frame plus MediaPipe's body mask for that moment. Turning is tracked from the pose: the guide only moves on while you're in view, and each capture's angle is refined from the 3D shoulder line.
 
-When the turn is done, the page builds the model in your browser:
+When the turn is done, it asks you to walk up close and look straight at the camera for one face photo (from across the room your face is only a few pixels wide). That close-up is lined up with the spin by your eyes and wrapped onto the front of the head, so the face is sharp. You can skip it.
+
+Then the page builds the model in your browser:
 
 1. **Line up.** People never turn at exactly the guide's pace, so each shot's angle is corrected first: for every shot, nearby angles are tried on a coarse grid and the one that carves away the least of what the other shots can see wins.
 2. **Fitted game body.** Carving a body straight from webcam outlines comes out lumpy, so instead a smooth, game-style body is built and every part is sized to you: head (hair included) from the outline at eye height and the side shots, torso width from the front shot and depth from the side shots, hips or a skirt or dress down to where your outline splits into two legs, each leg following its own outline, and arms and hands placed on your joints. Hair is its own shape: its colour is read from the back of your head, then its length and width down your back are traced in the back shot, and any strands falling forward over your shoulders are traced in the front shot.

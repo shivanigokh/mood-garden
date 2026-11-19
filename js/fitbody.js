@@ -293,7 +293,8 @@ export function fitBody(views, front) {
   // --- legs, following the outline of each leg below the split ---
   for (const [hip, knee, ankle, th, sh] of [[23, 25, 27, 'thighL', 'shinL'], [24, 26, 28, 'thighR', 'shinR']]) {
     const pts = [];
-    const yA = Math.max(0.05, J[ankle].y), y0 = splitY + 0.03;
+    // legs always reach the feet (the ankle mark sits high when the feet are out of shot)
+    const yA = clamp(J[ankle].y, 0.045, 0.075), y0 = splitY + 0.03;
     const n = 10;
     const legX = (y) => (y > J[knee].y ? lerp(J[knee].x, J[hip].x, (y - J[knee].y) / Math.max(0.01, J[hip].y - J[knee].y)) : lerp(J[ankle].x, J[knee].x, (y - J[ankle].y) / Math.max(0.01, J[knee].y - J[ankle].y)));
     for (let i = 0; i <= n; i++) {
@@ -309,8 +310,8 @@ export function fitBody(views, front) {
     }
     parts.push({ ...tube(pts), bones: [[th, V(J[hip]), V(J[knee])], [sh, V(J[knee]), V(J[ankle])]] });
     // foot
-    const fx = J[ankle].x, fr = 0.032 * k;
-    parts.push({ ...tube([{ p: new THREE.Vector3(fx, 0.03, -0.02), rx: fr, rz: fr * 0.75 }, { p: new THREE.Vector3(fx, 0.025, 0.05), rx: fr * 1.05, rz: fr * 0.7 }, { p: new THREE.Vector3(fx, 0.022, 0.09), rx: fr * 0.9, rz: fr * 0.6 }].map((q) => ({ ...q, p: q.p.clone() }))), bones: [[sh, V(J[knee]), V(J[ankle])]] });
+    const fx = pts[pts.length - 1].p.x, fr = 0.032 * k;
+    parts.push({ ...tube([{ p: new THREE.Vector3(fx, 0.04, -0.015), rx: fr, rz: fr * 0.8 }, { p: new THREE.Vector3(fx, 0.025, 0.05), rx: fr * 1.05, rz: fr * 0.7 }, { p: new THREE.Vector3(fx, 0.022, 0.09), rx: fr * 0.9, rz: fr * 0.6 }].map((q) => ({ ...q, p: q.p.clone() }))), bones: [[sh, V(J[knee]), V(J[ankle])]] });
   }
   // --- arms: shoulder, elbow, wrist and a hand ---
   for (const [s, e, w, ua, fa] of [[11, 13, 15, 'uArmL', 'fArmL'], [12, 14, 16, 'uArmR', 'fArmR']]) {
@@ -393,4 +394,63 @@ export function occupancy(parts, res) {
     }
   }
   return { occ, c };
+}
+
+// Map a close-up face photo onto the front of the head. The eyes in the close-up are
+// lined up with the eyes in the front spin shot, so the photo lands where your face is.
+// Returns a texture canvas plus a uv and a blend weight for every vertex (0 = no face).
+export function faceMap(fit, faceCap, front) {
+  const { positions } = fit.mesh, normals = fit.normals, n = positions.length / 3;
+  const L = faceCap.lm, F = front.lm;
+  if (!L || !F) return null;
+  const B = (p) => ({ x: (p.x * front.w - front.x0) / front.s, y: (front.yb - p.y * front.h) / front.s });
+  const mL = B(F[2]), mR = B(F[5]);
+  const pL = { x: L[2].x * faceCap.w, y: -L[2].y * faceCap.h }, pR = { x: L[5].x * faceCap.w, y: -L[5].y * faceCap.h }; // y up
+  const dm = { x: mL.x - mR.x, y: mL.y - mR.y }, dp = { x: pL.x - pR.x, y: pL.y - pR.y };
+  const lm = Math.hypot(dm.x, dm.y), lp = Math.hypot(dp.x, dp.y);
+  if (lm < 0.01 || lp < 10) return null;
+  const S = lp / lm, phi = Math.atan2(dp.y, dp.x) - Math.atan2(dm.y, dm.x);
+  const cs = Math.cos(phi) * S, sn = Math.sin(phi) * S;
+  const mM = { x: (mL.x + mR.x) / 2, y: (mL.y + mR.y) / 2 }, pM = { x: (pL.x + pR.x) / 2, y: (pL.y + pR.y) / 2 };
+  const toPhoto = (x, y) => { const dx = x - mM.x, dy = y - mM.y; return { x: pM.x + cs * dx - sn * dy, y: -(pM.y + sn * dx + cs * dy) }; };
+  // crop around the face
+  const half = lp * 2.4, cx = pM.x, cy = -pM.y + lp * 0.35;
+  const x0 = Math.max(0, Math.round(cx - half)), y0 = Math.max(0, Math.round(cy - half));
+  const x1 = Math.min(faceCap.w, Math.round(cx + half)), y1 = Math.min(faceCap.h, Math.round(cy + half));
+  if (x1 - x0 < 40 || y1 - y0 < 40) return null;
+  const src = document.createElement('canvas');
+  src.width = faceCap.w; src.height = faceCap.h;
+  src.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(faceCap.rgba.buffer, faceCap.rgba.byteOffset, faceCap.rgba.length), faceCap.w, faceCap.h), 0, 0);
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 512;
+  const g = canvas.getContext('2d');
+  g.drawImage(src, x0, y0, x1 - x0, y1 - y0, 0, 0, 512, 512);
+  // match the close-up's brightness to the spin shot's face
+  const lift = front.gain || 1;
+  if (lift > 1.02) {
+    const img = g.getImageData(0, 0, 512, 512), d = img.data, lut = new Uint8ClampedArray(256);
+    for (let i = 0; i < 256; i++) lut[i] = 255 * Math.pow(i / 255, 1 / lift);
+    for (let i = 0; i < d.length; i += 4) { d[i] = lut[d[i]]; d[i + 1] = lut[d[i + 1]]; d[i + 2] = lut[d[i + 2]]; }
+    g.putImageData(img, 0, 0);
+  }
+  const uv = new Float32Array(n * 2), w = new Float32Array(n);
+  const headIdx = BONES.indexOf('head');
+  const eyeSep = lm;
+  const fc = { x: mM.x, y: mM.y - eyeSep * 0.35 }; // around the nose
+  const sstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+  for (let i = 0; i < n; i++) {
+    if (fit.skin.si[i * 4] !== headIdx || fit.skin.sw[i * 4] < 0.6) continue;
+    const nz = normals[i * 3 + 2];
+    const x = positions[i * 3], y = positions[i * 3 + 1];
+    const d = Math.hypot(x - fc.x, (y - fc.y) * 0.85) / (eyeSep * 2.1);
+    // stop at the chin, so the collar in the close-up doesn't land on the neck
+    const wt = sstep(0.1, 0.5, nz) * (1 - sstep(0.75, 1.0, d)) * sstep(mM.y - eyeSep * 1.85, mM.y - eyeSep * 1.5, y);
+    if (wt <= 0) continue;
+    const p = toPhoto(x, y);
+    const u = (p.x - x0) / (x1 - x0), v = (p.y - y0) / (y1 - y0);
+    if (u < 0 || u > 1 || v < 0 || v > 1) continue;
+    uv[i * 2] = u; uv[i * 2 + 1] = 1 - v;
+    w[i] = wt;
+  }
+  return { canvas, uv, w };
 }
