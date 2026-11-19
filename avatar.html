@@ -9,7 +9,10 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Anton&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css?v=8" />
-  <link rel="stylesheet" href="avatar.css?v=8" />
+  <link rel="stylesheet" href="avatar.css?v=9" />
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three.module.min.js" } }
+  </script>
 </head>
 <body class="avatar">
   <nav class="modes" aria-label="Experiences">
@@ -24,15 +27,16 @@
   </nav>
   <script>document.querySelector('.modes [aria-current]')?.scrollIntoView({ inline: 'center', block: 'nearest' });</script>
 
-  <canvas id="stage" aria-label="Your game character"></canvas>
+  <canvas id="stage" aria-hidden="true"></canvas>
+  <canvas id="gl" aria-label="Your 3D game character"></canvas>
 
   <section id="landing" class="landing av-landing">
     <div class="landing-inner">
       <h1 class="av-title">AVATAR</h1>
-      <p class="av-sub">Step into the game. A full-body scan turns you into an open-world hero that moves when you move.</p>
+      <p class="av-sub">Spin once in front of the camera and get a 3D game version of you, wearing your real face and clothes, that moves when you move.</p>
       <button id="enter" class="av-btn">Scan me</button>
       <p id="landing-note" class="landing-note">
-        Stand back so the camera can see you from head to toe. Your colours and pose are read on this device and nothing is recorded or uploaded.
+        You’ll need room to stand 2 to 3 metres back, head to toe in view, with good light. Everything is built on this device and nothing is recorded or uploaded.
       </p>
     </div>
   </section>
@@ -45,12 +49,13 @@
     </figure>
 
     <div id="banner" class="av-banner" aria-live="polite"></div>
-    <div id="swatches" class="av-swatches" hidden></div>
+    <div id="build" class="av-build" hidden><div class="bar"><i></i></div><span></span></div>
 
     <div class="av-actions" id="actions">
       <button id="btn-scan" class="av-chip">Rescan</button>
-      <button id="btn-hair" class="av-chip" disabled>Hair</button>
-      <button id="btn-shades" class="av-chip" aria-pressed="false" disabled>Shades</button>
+      <button id="btn-mode" class="av-chip" disabled>Turntable</button>
+      <button id="btn-look" class="av-chip" disabled>Photo look</button>
+      <button id="btn-glb" class="av-chip" disabled>Save 3D</button>
       <button id="btn-poster" class="av-chip hot" disabled>Make poster</button>
     </div>
 
@@ -77,6 +82,6 @@
     </section>
   </div>
 
-  <script type="module" src="js/avatar.js?v=8"></script>
+  <script type="module" src="js/avatar.js?v=9"></script>
 </body>
 </html>

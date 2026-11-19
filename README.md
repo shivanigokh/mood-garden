@@ -131,16 +131,20 @@ Play all four as a party (stars per game, a final title or a champion's crown) o
 
 No camera? Click to drop food and drag to stir. **Draw a fish** opens a sketch pad (colours, brush, fill, eraser, undo). Draw with the mouse or a finger, or pinch in the air to draw with your hand, name it and release it. Your drawing is sliced into strips that ride the same swimming wave as the other fish, it turns to face where it swims, and it stays in the tank (saved in this browser, up to 12).
 
-## Avatar (full-body scan)
+## Avatar (3D spin scan)
 
-**Avatar** turns you into a bold, cel-shaded open-world game hero. Stand back so the camera sees you head to toe and hold still for three seconds while the scanner sweeps over you (a cyan hologram of the character copies you while it waits). During the scan, MediaPipe Pose places sample points on your hair, cheeks, shirt, upper arms and forearms, thighs, shins and shoes, and the camera frame is read at those points over many frames (median colour, so a passing shadow doesn't count). From that it picks:
+**Avatar** scans you into a rotatable, rigged 3D game character built from your real camera images. Stand back so the camera sees you head to toe, arms a little out from your sides, and hold still. Then turn slowly on the spot, all the way round to your left, following the guide (about 18 seconds). A capture is taken every 15° of turn, 24 in all, and each one keeps the camera frame plus MediaPipe's body mask for that moment. Turning is tracked from the pose: the guide only moves on while you're in view, and each capture's angle is refined from the 3D shoulder line.
 
-- skin, hair, top, trousers and shoe colours, nudged toward an illustrated palette
-- a jacket if your forearms match your top, otherwise a tee with bare arms
-- shorts if your shins look like skin
-- long hair if the area beside your jaw matches your hair
+When the turn is done, the page builds the model in your browser:
 
-If only your upper body is visible, it scans what it can and guesses the legs. The finished character is wiped in from the top, then mirrors your pose live (arms, legs, lean, head tilt and turn) on a sunset city street, drawn in two-tone cel shading with thick ink outlines. **Hair** cycles styles, **Shades** adds sunglasses, and **Make poster** builds a loading-screen style poster (title from your outfit colour, player profile stats, reputation stars) you can save as a PNG. All artwork, type treatment and names are original.
+1. **Shape (visual hull).** A 200³ voxel grid is carved by all 24 silhouettes (a voxel that falls outside the mask in more than two views is removed), small specks are dropped, and the result is smoothed and meshed with surface nets.
+2. **Paint.** Every point on the surface is coloured from the camera frames that faced it best and actually saw it (not hidden behind an arm), blended across the top three views. Your face, hair and clothes come from the photos themselves, not a palette.
+3. **Look.** A toon shader (banded light, rim light, ink outline) gives it the game look. **Photo look** switches to plain photo texture.
+4. **Rig.** The mesh gets an 11-bone skeleton placed from your landmarks, and **Copy me** poses it from your live body. **Turntable** spins it, and you can drag to rotate.
+
+**Save 3D** downloads a .glb (vertex-coloured mesh, opens in Blender, Windows 3D Viewer and most game engines). **Make poster** builds a loading-screen style poster with the 3D render you can save as a PNG. All artwork, type treatment and names are original, and nothing leaves your computer.
+
+**What a webcam scan can and can't do.** One webcam and a turn give the body's real outline, proportions and your actual colours and textures, which is enough to read as you. It can't recover fine 3D detail: the nose, eye sockets, fingers and folds come out smooth, with the detail carried by the photo texture instead. The top of the head and under the arms are never seen side-on, so they're filled in. For best results use even light, a plain uncluttered background, clothes that contrast with it, and a slow, steady turn on the spot.
 
 ## How it works
 
@@ -152,7 +156,8 @@ shadows.html    hand shadow puppets (shadows.css, js/shadows.js)
 pet.html        Pip the mirror pet (pet.css, js/pet.js)
 party.html      motion minigames (party.css, js/party.js)
 tank.html       hand-played aquarium with drawn fish (tank.css, js/tank.js)
-avatar.html     full-body scan into a game character (avatar.css, js/avatar.js)
+avatar.html     3D spin scan into a game character (avatar.css, js/avatar.js)
+js/scan3d.js    visual hull, meshing, projective texturing, rig and .glb export
 js/body.js      full-body tracking (MediaPipe Pose) with one-euro smoothing
 js/pose-worker.js  runs the pose model in a Web Worker
 js/shared.js    small helpers and a creature-sound synth for Shadows and Pet

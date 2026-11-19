@@ -1,17 +1,24 @@
-// AVATAR: a full-body scan turns you into a bold, cel-shaded open-world game hero.
-// MediaPipe Pose finds your joints; during the scan the camera frame is sampled at
-// your hair, skin, shirt, sleeves, trousers and shoes to pick the character's colours,
-// sleeve and leg length and hair length. Then the character mirrors your pose live
-// in a sunset city, and you can make a loading-screen style poster of it.
-// Everything is drawn here; there are no external images.
+// AVATAR: spin once in front of the camera and get a 3D game version of yourself.
+//
+// The scan: stand back, then turn slowly to your left following the guide. Every 15°
+// a full-resolution frame is captured with MediaPipe's body mask and 3D landmarks
+// (the landmarks refine the turn angle). From those 24 views scan3d.js carves a
+// visual hull, meshes it, and works out which camera image best shows each point.
+// The result is drawn with your real camera images on it, with an optional toon
+// game look (banded light, rim light, ink outline), rigged to a simple skeleton so
+// it copies your pose live. It can spin on a turntable, be saved as a .glb 3D file,
+// or be put on a poster.
 
-import { PoseTracker, makePose } from './body.js?v=8';
-import { clamp01, clamp, lerp, ease, cameraErrorMessage, toScreen, Sfx, setupToggle } from './shared.js?v=8';
+import * as THREE from 'three';
+import { PoseTracker } from './body.js?v=9';
+import { clamp01, ease, cameraErrorMessage, Sfx, setupToggle } from './shared.js?v=8';
+import * as S3 from './scan3d.js?v=9';
 
 const $ = (id) => document.getElementById(id);
 const video = $('cam');
-const canvas = $('stage');
-const ctx = canvas.getContext('2d');
+const stage = $('stage');
+const sctx2 = stage.getContext('2d');
+const glCanvas = $('gl');
 const scanCv = $('scan');
 const sctx = scanCv.getContext('2d');
 const landing = $('landing');
@@ -22,26 +29,59 @@ const banner = $('banner');
 const statusEl = $('status');
 const statusText = statusEl.querySelector('.status-text');
 const mirror = $('mirror');
-const swatchesEl = $('swatches');
+const buildEl = $('build');
 
 const TAU = Math.PI * 2;
 const INK = '#1a0d2a';
-const rand = (a, b) => a + Math.random() * (b - a);
+const N_VIEWS = 24;
+const SPIN_SECONDS = 18; // one slow, comfortable turn
+const RES = { nx: 200, ny: 208, nz: 200, nu: 200, nv: 208 };
 
 let W = 0, H = 0, DPR = 1;
 const backdrop = document.createElement('canvas');
 const bctx = backdrop.getContext('2d');
+
+// ======================================================================
+// Three.js stage
+// ======================================================================
+const renderer = new THREE.WebGLRenderer({ canvas: glCanvas, alpha: true, antialias: true, preserveDrawingBuffer: true });
+renderer.setClearColor(0x000000, 0);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(26, 1, 0.05, 50);
+const rig = new THREE.Group(); // turntable + mirror
+scene.add(rig);
+const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.32, 48), new THREE.MeshBasicMaterial({ color: 0x1a0d2a, transparent: true, opacity: 0.35, depthWrite: false }));
+shadow.rotation.x = -Math.PI / 2;
+shadow.scale.set(1, 0.55, 1);
+shadow.position.y = 0.001;
+scene.add(shadow);
+
 function resize() {
   DPR = Math.min(window.devicePixelRatio || 1, 2);
   W = window.innerWidth;
   H = window.innerHeight;
-  canvas.width = Math.round(W * DPR);
-  canvas.height = Math.round(H * DPR);
-  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  backdrop.width = canvas.width;
-  backdrop.height = canvas.height;
+  stage.width = Math.round(W * DPR);
+  stage.height = Math.round(H * DPR);
+  sctx2.setTransform(DPR, 0, 0, DPR, 0, 0);
+  backdrop.width = stage.width;
+  backdrop.height = stage.height;
   bctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   paintCity(bctx, W, H, 1);
+  sctx2.drawImage(backdrop, 0, 0, W, H);
+  renderer.setPixelRatio(DPR);
+  renderer.setSize(W, H, false);
+  camera.aspect = W / H;
+  // frame a body of height 1 standing at the origin, with a little headroom
+  // (the name badge sits over the top of the screen, so keep the head below it)
+  const fitH = 1.55, fitW = 0.95;
+  const tan = Math.tan((camera.fov * Math.PI) / 360);
+  const dist = Math.max(fitH / 2 / tan, fitW / 2 / tan / camera.aspect);
+  camera.position.set(0, 0.62, dist);
+  camera.lookAt(0, 0.6, 0);
+  camera.updateProjectionMatrix();
+  sizeScanCanvas();
+}
+function sizeScanCanvas() {
   const r = scanCv.getBoundingClientRect();
   scanCv.width = Math.max(2, Math.round(r.width * DPR));
   scanCv.height = Math.max(2, Math.round(r.height * DPR));
@@ -49,507 +89,385 @@ function resize() {
 window.addEventListener('resize', resize);
 
 // ======================================================================
-// Colour helpers
+// Shaders: real camera images blended per view, with a toon game look
 // ======================================================================
-const hex = (c) => '#' + c.map((v) => Math.round(clamp(v, 0, 255)).toString(16).padStart(2, '0')).join('');
-const mix = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
-const cdist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
-function rgb2hsl([r, g, b]) {
-  r /= 255; g /= 255; b /= 255;
-  const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
-  let h = 0, s = 0;
-  const l = (mx + mn) / 2;
-  if (mx !== mn) {
-    const d = mx - mn;
-    s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
-    h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
-    h /= 6;
+const IDX = [0, 1, 2, 3, 4, 5];
+const wDecl = IDX.map((i) => `attribute vec4 w${i}; varying vec4 v${i};`).join('\n');
+const wCopy = IDX.map((i) => `v${i} = w${i};`).join(' ');
+const wUnpack = IDX.map((i) => `ws[${i * 4}] = v${i}.x; ws[${i * 4 + 1}] = v${i}.y; ws[${i * 4 + 2}] = v${i}.z; ws[${i * 4 + 3}] = v${i}.w;`).join('\n');
+
+const skinMat = new THREE.ShaderMaterial({
+  uniforms: {
+    atlas: { value: null },
+    views: { value: Array.from({ length: N_VIEWS }, () => new THREE.Vector4()) },
+    cols: { value: 6 },
+    rows: { value: 4 },
+    toon: { value: 1 },
+  },
+  vertexShader: /* glsl */ `
+    #include <common>
+    #include <skinning_pars_vertex>
+    ${wDecl}
+    varying vec3 vRest;
+    varying vec3 vN;
+    varying vec3 vV;
+    void main() {
+      vRest = position;
+      ${wCopy}
+      #include <beginnormal_vertex>
+      #include <skinbase_vertex>
+      #include <skinnormal_vertex>
+      #include <defaultnormal_vertex>
+      #include <begin_vertex>
+      #include <skinning_vertex>
+      #include <project_vertex>
+      vN = normalize(transformedNormal);
+      vV = normalize(-mvPosition.xyz);
+    }`,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D atlas;
+    uniform vec4 views[${N_VIEWS}];
+    uniform float cols;
+    uniform float rows;
+    uniform float toon;
+    ${IDX.map((i) => `varying vec4 v${i};`).join('\n')}
+    varying vec3 vRest;
+    varying vec3 vN;
+    varying vec3 vV;
+    void main() {
+      float ws[24];
+      ${wUnpack}
+      vec3 col = vec3(0.0);
+      float tw = 0.0;
+      float vl = clamp(vRest.y / 1.04, 0.002, 0.998);
+      for (int i = 0; i < ${N_VIEWS}; i++) {
+        float w = ws[i];
+        if (w < 0.004) continue;
+        vec4 V = views[i];
+        float u = clamp(vRest.x * V.x + vRest.z * V.y + 0.5, 0.002, 0.998);
+        vec2 uv = vec2((V.z + u) / cols, 1.0 - (V.w + 1.0 - vl) / rows);
+        col += w * texture2D(atlas, uv).rgb;
+        tw += w;
+      }
+      col /= max(tw, 1e-4);
+      vec3 n = normalize(vN);
+      vec3 L = normalize(vec3(-0.45, 0.55, 0.7));
+      float ndl = dot(n, L);
+      // toon: three light bands, punchier colour, a warm sunset rim
+      float band = ndl > 0.3 ? 1.04 : ndl > -0.15 ? 0.84 : 0.66;
+      float lum = dot(col, vec3(0.299, 0.587, 0.114));
+      vec3 sat = mix(vec3(lum), col, 1.3);
+      vec3 post = mix(sat, floor(sat * 8.0 + 0.5) / 8.0, 0.45);
+      vec3 shadeTint = mix(vec3(0.82, 0.74, 1.0), vec3(1.0), step(0.3, ndl));
+      vec3 t = post * band * shadeTint;
+      float rim = pow(1.0 - max(dot(n, normalize(vV)), 0.0), 3.0);
+      t += rim * vec3(1.0, 0.55, 0.4) * 0.45;
+      vec3 photo = col * (0.9 + 0.12 * max(ndl, 0.0));
+      gl_FragColor = vec4(clamp(mix(photo, t, toon), 0.0, 1.0), 1.0);
+    }`,
+});
+
+const outlineMat = new THREE.ShaderMaterial({
+  uniforms: { outline: { value: 0.0045 } },
+  side: THREE.BackSide,
+  vertexShader: /* glsl */ `
+    #include <common>
+    #include <skinning_pars_vertex>
+    uniform float outline;
+    void main() {
+      #include <beginnormal_vertex>
+      #include <begin_vertex>
+      transformed += normalize(objectNormal) * outline;
+      #include <skinbase_vertex>
+      #include <skinnormal_vertex>
+      #include <skinning_vertex>
+      #include <project_vertex>
+    }`,
+  fragmentShader: /* glsl */ `void main() { gl_FragColor = vec4(0.1, 0.05, 0.16, 1.0); }`,
+});
+
+// ======================================================================
+// The built avatar
+// ======================================================================
+let model = null;
+let mode = 'live'; // live | turntable
+let spinY = 0, dragV = 0;
+
+function buildModel(mesh, normals, W8, views, atlasInfo, front) {
+  if (model) { rig.remove(model.group); model.geo.dispose(); }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+  geo.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
+  const n = mesh.positions.length / 3;
+  for (let a = 0; a < 6; a++) {
+    const arr = new Float32Array(n * 4);
+    for (let i = 0; i < n; i++) for (let k = 0; k < 4; k++) arr[i * 4 + k] = W8[i * 24 + a * 4 + k];
+    geo.setAttribute('w' + a, new THREE.BufferAttribute(arr, 4));
   }
-  return [h, s, l];
+  // rig
+  const J = S3.restJoints(front);
+  const layout = S3.boneLayout(J);
+  const { si, sw } = S3.skinWeights(mesh, layout);
+  geo.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(si, 4));
+  geo.setAttribute('skinWeight', new THREE.Float32BufferAttribute(sw, 4));
+  const group = new THREE.Group();
+  const bones = {};
+  for (const name of S3.BONES) { const b = new THREE.Bone(); b.name = name; bones[name] = b; }
+  for (const name of S3.BONES) {
+    const p = S3.PARENT[name];
+    const at = layout[name].at;
+    if (p) {
+      const pa = layout[p].at;
+      bones[name].position.set(at.x - pa.x, at.y - pa.y, at.z - pa.z);
+      bones[p].add(bones[name]);
+    } else {
+      bones[name].position.set(at.x, at.y, at.z);
+      group.add(bones[name]);
+    }
+  }
+  rig.add(group);
+  rig.updateMatrixWorld(true);
+  const skel = new THREE.Skeleton(S3.BONES.map((b) => bones[b]));
+  const tex = new THREE.CanvasTexture(atlasInfo.atlas);
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.anisotropy = 4;
+  skinMat.uniforms.atlas.value = tex;
+  skinMat.uniforms.cols.value = atlasInfo.cols;
+  skinMat.uniforms.rows.value = atlasInfo.rows;
+  views.forEach((v, i) => skinMat.uniforms.views.value[i].set(v.cos, v.sin, v.col, v.row));
+  const sm = new THREE.SkinnedMesh(geo, skinMat);
+  const om = new THREE.SkinnedMesh(geo, outlineMat);
+  sm.frustumCulled = om.frustumCulled = false;
+  group.add(sm, om);
+  group.updateMatrixWorld(true);
+  sm.bind(skel);
+  om.bind(skel, sm.bindMatrix);
+  const restDir = {};
+  for (const [b, [a, c]] of Object.entries(S3.DIRS)) {
+    const pa = J[a], pc = J[c];
+    restDir[b] = new THREE.Vector3(pc.x - pa.x, pc.y - pa.y, 0).normalize();
+  }
+  model = { group, mesh: sm, outline: om, bones, restDir, geo, views, front, J };
+  return model;
 }
-function hsl2rgb([h, s, l]) {
-  if (!s) return [l * 255, l * 255, l * 255];
-  const q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
-  const f = (t) => { t = (t + 1) % 1; return t < 1 / 6 ? p + (q - p) * 6 * t : t < 0.5 ? q : t < 2 / 3 ? p + (q - p) * (2 / 3 - t) * 6 : p; };
-  return [f(h + 1 / 3) * 255, f(h) * 255, f(h - 1 / 3) * 255];
-}
-// make a sampled colour read as an illustration: a touch more saturated, never pure black/white
-function stylize(c, satBoost = 1.15, lo = 0.1, hi = 0.88) {
-  const [h, s, l] = rgb2hsl(c);
-  return hsl2rgb([h, clamp(s * satBoost, 0, 1), clamp(l, lo, hi)]);
-}
-// cel shadow: darker and nudged toward violet, like a sunset bounce light
-const shadowOf = (c) => mix(c.map((v) => v * 0.62), [60, 20, 90], 0.22);
-const lightOf = (c) => mix(c, [255, 240, 220], 0.28);
 
-const COLOR_NAMES = [
-  ['CRIMSON', [190, 30, 45]], ['SCARLET', [235, 60, 40]], ['TANGERINE', [240, 130, 40]], ['GOLDEN', [230, 190, 50]],
-  ['LIME', [140, 200, 60]], ['JADE', [40, 150, 100]], ['TEAL', [30, 140, 150]], ['SKY', [90, 170, 230]],
-  ['COBALT', [40, 80, 180]], ['MIDNIGHT', [25, 30, 70]], ['VIOLET', [120, 60, 180]], ['ROSE', [230, 110, 160]],
-  ['IVORY', [235, 230, 215]], ['SILVER', [170, 170, 175]], ['SHADOW', [40, 40, 45]], ['DESERT', [190, 150, 100]],
-  ['COCOA', [110, 70, 45]], ['OLIVE', [110, 115, 60]], ['DENIM', [70, 95, 140]],
-];
-const colorName = (c) => COLOR_NAMES.reduce((best, n) => (cdist(n[1], c) < cdist(best[1], c) ? n : best))[0];
+// pose the skeleton from live landmarks (image space, not mirrored)
+const _q = new THREE.Quaternion(), _v = new THREE.Vector3();
+function poseModel(lm, dt) {
+  if (!model) return;
+  const vw = video.videoWidth || 1280, vh = video.videoHeight || 720;
+  const world = {};
+  const k = ease(dt, 0.08);
+  for (const name of S3.BONES) {
+    const bone = model.bones[name];
+    const parent = S3.PARENT[name];
+    const pw = parent ? world[parent] : new THREE.Quaternion();
+    let target = new THREE.Quaternion();
+    const pair = S3.DIRS[name];
+    if (lm && pair) {
+      const a = S3.landmarkPoint(lm, pair[0]), b = S3.landmarkPoint(lm, pair[1]);
+      if ((a.visibility ?? 1) > 0.5 && (b.visibility ?? 1) > 0.5) {
+        _v.set((b.x - a.x) * vw, -(b.y - a.y) * vh, -((b.z || 0) - (a.z || 0)) * vw * 0.5).normalize();
+        // webcam depth is noisy: cap how far a bone may point at or away from the camera
+        if (Math.abs(_v.z) > 0.55) { const xy = Math.hypot(_v.x, _v.y) || 1e-6, f = Math.sqrt(1 - 0.55 * 0.55) / xy; _v.set(_v.x * f, _v.y * f, Math.sign(_v.z) * 0.55); }
+        _q.setFromUnitVectors(model.restDir[name], _v);
+        target = pw.clone().invert().multiply(_q);
+      }
+    }
+    bone.quaternion.slerp(target, k);
+    world[name] = pw.clone().multiply(bone.quaternion);
+  }
+}
 
 // ======================================================================
-// The character's look (filled in by the scan)
-// ======================================================================
-const DEFAULT_LOOK = {
-  skin: [214, 160, 120], hair: [45, 30, 25], shirt: [230, 70, 70], pants: [60, 80, 130], shoes: [235, 235, 235],
-  longSleeves: false, shorts: false, longHair: false, hairStyle: 'short', shades: false, build: 1, partial: false,
-};
-let look = null; // null until scanned
-const HAIR_STYLES = ['short', 'long', 'buzz', 'bun', 'cap'];
-
-// ======================================================================
-// Pose → smoothed bone angles
+// The scan
 // ======================================================================
 let tracker = null;
-const A = {}; // smoothed angles and values
-const REST = {
-  torso: -Math.PI / 2, sline: 0, hline: 0, head: -Math.PI / 2, tilt: 0, yaw: 0,
-  uaL: Math.PI / 2 + 0.18, faL: Math.PI / 2 + 0.1, uaR: Math.PI / 2 - 0.18, faR: Math.PI / 2 - 0.1,
-  thL: Math.PI / 2 + 0.07, shL: Math.PI / 2 + 0.03, thR: Math.PI / 2 - 0.07, shR: Math.PI / 2 - 0.03,
-  ftL: Math.PI - 0.35, ftR: 0.35, hdL: Math.PI / 2 + 0.1, hdR: Math.PI / 2 - 0.1, shift: 0,
-};
-Object.assign(A, REST);
-let present = 0; // 0..1 how sure we are someone is there
-let fullBody = false;
-let motion = 0;
-let prevRaw = null;
+let scan = { state: 'idle' };
+let fullT = 0;
 
-const angOf = (a, b) => Math.atan2(b.y - a.y, b.x - a.x);
-function angEase(key, target, k) {
-  let d = target - A[key];
-  d = Math.atan2(Math.sin(d), Math.cos(d));
-  A[key] += d * k;
+function resetScan() {
+  scan = { state: 'waiting', caps: [], next: 0, guide: 0, busy: false };
+  fullT = 0;
+  mirror.classList.add('big');
+  mirror.classList.remove('hidden');
+  ['btn-mode', 'btn-look', 'btn-glb', 'btn-poster'].forEach((id) => ($(id).disabled = true));
+  if (model) model.group.visible = false;
+  setTimeout(sizeScanCanvas, 750);
 }
 
-function readPose(dt) {
-  const person = tracker?.people?.[0];
-  present += ((person ? 1 : 0) - present) * ease(dt, 0.3);
-  if (!person) {
-    for (const k in REST) if (k !== 'shift') angEase(k, REST[k], ease(dt, 0.6));
-    fullBody = false;
-    return null;
+function bodyCheck(lm) {
+  const v = (i) => (lm[i].visibility ?? 1) > 0.55;
+  const inFrame = lm[0].y > 0.04 && Math.max(lm[27].y, lm[28].y, lm[31].y, lm[32].y) < 0.97;
+  return { full: v(0) && v(11) && v(12) && v(23) && v(24) && v(27) && v(28) && inFrame, feetCut: !inFrame };
+}
+
+// shoulder line from the 3D landmarks gives the turn angle, up to front/back
+function refineYaw(world, nominal) {
+  if (!world) return nominal;
+  const L = world[11], R = world[12];
+  const est = Math.atan2(L.z - R.z, L.x - R.x);
+  let best = nominal, bd = Infinity;
+  for (const cand of [est, est + Math.PI]) {
+    const d = Math.abs(Math.atan2(Math.sin(cand - nominal), Math.cos(cand - nominal)));
+    if (d < bd) { bd = d; best = cand; }
   }
-  const lm = person.lm;
+  if (bd > (35 * Math.PI) / 180) return nominal;
+  const d = Math.atan2(Math.sin(best - nominal), Math.cos(best - nominal));
+  return nominal + d * 0.65; // lean on the measurement, not all the way
+}
+
+function scanStep(dt, person) {
+  const lm = person?.raw || null;
+  if (scan.state === 'waiting') {
+    const chk = lm ? bodyCheck(lm) : null;
+    fullT = chk?.full ? fullT + dt : 0;
+    setBanner(!lm ? 'Step into the frame' : chk.full ? 'Arms a little out from your sides… hold still' : chk.feetCut ? 'Step back: head to toe in view' : 'Step back so I can see all of you');
+    if (fullT > 1.4) { scan.state = 'spinning'; scan.guide = 0; scan.next = 0; S.go(); }
+  } else if (scan.state === 'spinning') {
+    if (lm) scan.guide = Math.min(TAU, scan.guide + (TAU / SPIN_SECONDS) * dt);
+    const target = (scan.next / N_VIEWS) * TAU;
+    if (scan.next < N_VIEWS && scan.guide >= target && !scan.busy && lm) {
+      scan.busy = true;
+      const want = scan.next;
+      tracker.capture().then((cap) => {
+        scan.busy = false;
+        if (scan.state !== 'spinning' || scan.next !== want || !cap || !cap.mask || !cap.rgba || !cap.lm) return;
+        cap.theta = refineYaw(cap.world, target);
+        cap.nominal = target;
+        scan.caps.push(cap);
+        scan.next++;
+        S.tick(scan.next / N_VIEWS);
+        if (scan.next >= N_VIEWS) build(scan.caps);
+      });
+    }
+    const pct = Math.round((scan.caps.length / N_VIEWS) * 100);
+    setBanner(lm ? `Turn slowly to your left, follow the dot · ${pct}%` : 'Come back into view');
+  }
+}
+
+async function build(caps) {
+  scan.state = 'building';
+  setBanner('Building your 3D self');
+  buildEl.hidden = false;
+  const bar = buildEl.querySelector('i'), label = buildEl.querySelector('span');
+  const step = async (f, text) => { bar.style.width = Math.round(f * 100) + '%'; label.textContent = text; await new Promise((r) => setTimeout(r, 16)); };
+  try {
+    await step(0.02, 'Lining up your silhouettes…');
+    const views = S3.measure(caps);
+    const bad = views.filter((v) => v.px < 40).length;
+    if (bad > N_VIEWS / 3) throw new Error('The camera lost you during the turn. Try again with more light and a plainer background.');
+    await step(0.08, 'Cutting out your outline from every angle…');
+    const atlasInfo = S3.prepare(views, RES);
+    await step(0.18, 'Carving your shape…');
+    const { occ, c } = await S3.carve(views, RES, (f) => { bar.style.width = Math.round((0.18 + f * 0.42) * 100) + '%'; });
+    await step(0.62, 'Smoothing the surface…');
+    const field = S3.blurField(occ, RES.nx, RES.ny, RES.nz, 2);
+    await step(0.7, 'Building the mesh…');
+    const mesh = S3.surfaceNets(field, RES.nx, RES.ny, RES.nz, c);
+    if (mesh.indices.length < 300) throw new Error('Not enough of you made it into the scan. Stand head to toe in view and turn a little slower.');
+    S3.orient(mesh, field, RES.nx, RES.ny, RES.nz, c);
+    S3.smooth(mesh, 4);
+    const geoTmp = new THREE.BufferGeometry();
+    geoTmp.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
+    geoTmp.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
+    geoTmp.computeVertexNormals();
+    const normals = geoTmp.getAttribute('normal').array;
+    await step(0.8, 'Painting on your real colours…');
+    const Wts = S3.viewWeights(mesh, normals, views, occ, RES, c);
+    await step(0.92, 'Rigging your skeleton…');
+    // the view closest to facing the camera gives the rest pose
+    const front = views.reduce((a, b) => (Math.abs(Math.sin(b.theta / 2)) < Math.abs(Math.sin(a.theta / 2)) ? b : a));
+    buildModel(mesh, normals, Wts, views, atlasInfo, front);
+    Object.assign(model, { atlasInfo, weights: Wts, meshData: mesh, normals, title: makeTitle(front), reveal: 0 });
+    await step(1, 'Done');
+    scan.state = 'done';
+    buildEl.hidden = true;
+    mirror.classList.remove('big');
+    setTimeout(sizeScanCanvas, 750);
+    model.group.visible = true;
+    ['btn-mode', 'btn-look', 'btn-glb', 'btn-poster'].forEach((id) => ($(id).disabled = false));
+    S.done();
+    for (const v of views) { v.rgba = null; v.mask = null; } // free the raw frames
+    front.rgba = null;
+  } catch (err) {
+    console.error(err);
+    buildEl.hidden = true;
+    scan.state = 'failed';
+    setBanner(`Scan failed <small>${err.message || err} Press Rescan.</small>`);
+  }
+}
+
+// ======================================================================
+// Scanner overlay on the camera view: skeleton, laser and the turn guide
+// ======================================================================
+function drawScanOverlay(person, t) {
+  const cw = scanCv.width, ch = scanCv.height;
+  sctx.setTransform(1, 0, 0, 1, 0, 0);
+  sctx.clearRect(0, 0, cw, ch);
   const vw = video.videoWidth || 1280, vh = video.videoHeight || 720;
-  const P = lm.map((p) => toScreen(p, vw, vh, W, H));
-  const v = (i) => lm[i].v > 0.5;
-  const k = ease(dt, 0.07);
-  const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
-  const sm = mid(P[11], P[12]), hm = mid(P[23], P[24]);
-  const legs = v(23) && v(24);
-  fullBody = legs && v(25) && v(26) && v(27) && v(28) && v(0);
-  if (legs) angEase('torso', angOf(hm, sm), k);
-  else angEase('torso', REST.torso + (sm.x - W / 2) * 0, ease(dt, 0.4));
-  angEase('sline', angOf(P[11], P[12]), k);
-  angEase('hline', legs ? angOf(P[23], P[24]) : A.sline * 0.5, k);
-  // head: from the shoulders to between the eyes, tilt from the eye line
-  const eyes = mid(P[2], P[5]);
-  if (v(0)) {
-    angEase('head', angOf(sm, eyes), k);
-    angEase('tilt', angOf(P[2], P[5]), k);
-    const ears = mid(P[7], P[8]);
-    const ew = Math.hypot(P[7].x - P[8].x, P[7].y - P[8].y) || 1;
-    A.yaw += (clamp((P[0].x - ears.x) / ew, -0.6, 0.6) - A.yaw) * k;
-  }
-  // limbs: measured when visible, resting otherwise
-  const limb = (key, a, b) => angEase(key, v(a) && v(b) ? angOf(P[a], P[b]) : REST[key], v(a) && v(b) ? k : ease(dt, 0.4));
-  limb('uaL', 11, 13); limb('faL', 13, 15); limb('uaR', 12, 14); limb('faR', 14, 16);
-  limb('hdL', 15, 19); limb('hdR', 16, 20);
-  limb('thL', 23, 25); limb('shL', 25, 27); limb('thR', 24, 26); limb('shR', 26, 28);
-  limb('ftL', 29, 31); limb('ftR', 30, 32);
-  // drift left and right with you, a little
-  const anchorX = legs ? hm.x : sm.x;
-  A.shift += (clamp((anchorX - W / 2) / W, -0.5, 0.5) - A.shift) * k;
-  // how much you are moving (for the "hold still" part of the scan)
-  if (prevRaw) {
-    let m = 0;
-    for (const i of [0, 11, 12, 15, 16, 23, 24]) m += Math.hypot(lm[i].x - prevRaw[i].x, lm[i].y - prevRaw[i].y);
-    motion += (m / dt / 7 - motion) * ease(dt, 0.25);
-  }
-  prevRaw = lm.map((p) => ({ x: p.x, y: p.y }));
-  return { lm, P };
-}
-
-// character proportions in head units (u)
-function buildJoints(cx, groundY, u, build = 1) {
-  const dir = (a, l) => ({ x: Math.cos(a) * l, y: Math.sin(a) * l });
-  const add = (p, d) => ({ x: p.x + d.x, y: p.y + d.y });
-  const T = 2.55 * u, SW = 2.05 * u * build, HW = 1.35 * u * build;
-  const UA = 1.4 * u, FA = 1.25 * u, TH = 1.75 * u, SH = 1.65 * u;
-  const hip = { x: cx, y: 0 };
-  const shC = add(hip, dir(A.torso, T));
-  const sl = dir(A.sline, SW / 2), hl = dir(A.hline, HW / 2);
-  const sL = { x: shC.x - sl.x, y: shC.y - sl.y }, sR = { x: shC.x + sl.x, y: shC.y + sl.y };
-  const hL = { x: hip.x - hl.x, y: hip.y - hl.y }, hR = { x: hip.x + hl.x, y: hip.y + hl.y };
-  const eL = add(sL, dir(A.uaL, UA)), wL = add(eL, dir(A.faL, FA));
-  const eR = add(sR, dir(A.uaR, UA)), wR = add(eR, dir(A.faR, FA));
-  const kL = add(hL, dir(A.thL, TH)), aL = add(kL, dir(A.shL, SH));
-  const kR = add(hR, dir(A.thR, TH)), aR = add(kR, dir(A.shR, SH));
-  const head = add(shC, dir(A.head, 0.95 * u));
-  const J = { hip, shC, sL, sR, hL, hR, eL, wL, eR, wR, kL, aL, kR, aR, head, u };
-  // stand on the ground: the lowest ankle sits just above the ground line
-  const low = Math.max(aL.y, aR.y) + 0.32 * u;
-  const dy = groundY - low;
-  for (const key in J) if (key !== 'u') J[key].y += dy;
-  return J;
-}
-
-// ======================================================================
-// Drawing helpers: smooth tubes and cel shading with ink outlines
-// ======================================================================
-function tubePath(c, pts, ws, steps = 6) {
-  const n = pts.length;
-  const S = [];
-  for (let i = 0; i < n - 1; i++) {
-    const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(n - 1, i + 2)];
-    for (let j = 0; j < steps; j++) {
-      const t = j / steps, t2 = t * t, t3 = t2 * t;
-      const cr = (a, b, cc, d) => 0.5 * (2 * b + (-a + cc) * t + (2 * a - 5 * b + 4 * cc - d) * t2 + (-a + 3 * b - 3 * cc + d) * t3);
-      S.push([cr(p0.x, p1.x, p2.x, p3.x), cr(p0.y, p1.y, p2.y, p3.y), ws[i] + (ws[i + 1] - ws[i]) * t]);
+  const s = Math.max(cw / vw, ch / vh);
+  const ox = (vw * s - cw) / 2, oy = (vh * s - ch) / 2;
+  const pt = (p) => ({ x: p.x * vw * s - ox, y: p.y * vh * s - oy });
+  const spinning = scan.state === 'spinning';
+  if (person) {
+    const lm = person.lm;
+    sctx.strokeStyle = spinning ? 'rgba(90, 240, 255, 0.95)' : 'rgba(255, 207, 63, 0.9)';
+    sctx.lineWidth = 2 * DPR;
+    sctx.lineCap = 'round';
+    const bones = [[11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24], [23, 25], [25, 27], [24, 26], [26, 28]];
+    for (const [a, b] of bones) {
+      if (lm[a].v < 0.5 || lm[b].v < 0.5) continue;
+      const p = pt(lm[a]), q = pt(lm[b]);
+      sctx.beginPath(); sctx.moveTo(p.x, p.y); sctx.lineTo(q.x, q.y); sctx.stroke();
     }
   }
-  S.push([pts[n - 1].x, pts[n - 1].y, ws[n - 1]]);
-  const m = S.length, L = [], R = [], N = [];
-  for (let k = 0; k < m; k++) {
-    const a = S[Math.max(0, k - 1)], b = S[Math.min(m - 1, k + 1)];
-    let dx = b[0] - a[0], dy = b[1] - a[1];
-    const len = Math.hypot(dx, dy) || 1;
-    dx /= len; dy /= len;
-    N.push(Math.atan2(dx, -dy));
-    L.push([S[k][0] - dy * S[k][2], S[k][1] + dx * S[k][2]]);
-    R.push([S[k][0] + dy * S[k][2], S[k][1] - dx * S[k][2]]);
+  if (spinning || scan.state === 'building') {
+    const y = (Math.sin(t * 2.2) * 0.5 + 0.5) * ch;
+    const g = sctx.createLinearGradient(0, y - 40 * DPR, 0, y);
+    g.addColorStop(0, 'rgba(90, 240, 255, 0)');
+    g.addColorStop(1, 'rgba(90, 240, 255, 0.35)');
+    sctx.fillStyle = g;
+    sctx.fillRect(0, y - 40 * DPR, cw, 40 * DPR);
+    sctx.fillStyle = 'rgba(200, 255, 255, 0.95)';
+    sctx.fillRect(0, y, cw, 2 * DPR);
   }
-  c.beginPath();
-  c.moveTo(L[0][0], L[0][1]);
-  for (let k = 1; k < m; k++) c.lineTo(L[k][0], L[k][1]);
-  c.arc(S[m - 1][0], S[m - 1][1], Math.max(S[m - 1][2], 0.01), N[m - 1], N[m - 1] - Math.PI, true);
-  for (let k = m - 1; k >= 0; k--) c.lineTo(R[k][0], R[k][1]);
-  c.arc(S[0][0], S[0][1], Math.max(S[0][2], 0.01), N[0] - Math.PI, N[0] - TAU, true);
-  c.closePath();
-}
-
-// fill a shape in two tones (lit + shadow) and ink it
-function cel(c, path, base, u, opts = {}) {
-  const off = u * (opts.off ?? 0.16);
-  path();
-  c.fillStyle = hex(opts.shadow || shadowOf(base));
-  c.fill();
-  c.save();
-  path();
-  c.clip();
-  c.translate(-off, -off * 0.55); // light from the upper left
-  path();
-  c.fillStyle = hex(base);
-  c.fill();
-  c.restore();
-  if (opts.shine) {
-    // a thin highlight edge on the lit side
-    c.save();
-    path();
-    c.clip();
-    c.lineWidth = u * 0.12;
-    c.strokeStyle = hex(lightOf(base));
-    c.translate(off * 0.45, off * 0.35);
-    path();
-    c.globalAlpha = 0.55;
-    c.stroke();
-    c.restore();
-  }
-  if (opts.ink !== false) {
-    path();
-    c.lineWidth = u * 0.075;
-    c.lineJoin = 'round';
-    c.lineCap = 'round';
-    c.strokeStyle = INK;
-    c.stroke();
+  if (spinning) {
+    // top-down turn guide: a ring, dots for captured angles, and the dot to follow.
+    // The canvas is mirrored like the video, so draw it un-mirrored for reading.
+    sctx.save();
+    sctx.translate(cw, 0);
+    sctx.scale(-1, 1);
+    const R = Math.min(cw, ch) * 0.12, cx = cw - R * 1.4 - 16 * DPR, cy = R * 1.4 + 16 * DPR;
+    sctx.fillStyle = 'rgba(26, 13, 42, 0.75)';
+    sctx.beginPath(); sctx.arc(cx, cy, R * 1.35, 0, TAU); sctx.fill();
+    sctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    sctx.lineWidth = 6 * DPR;
+    sctx.beginPath(); sctx.arc(cx, cy, R, 0, TAU); sctx.stroke();
+    // seen from above with the camera at the bottom: turning to your left (mirror view) is clockwise
+    const ang = (a) => Math.PI / 2 + a;
+    for (let i = 0; i < scan.caps.length; i++) {
+      const a = ang((i / N_VIEWS) * TAU);
+      sctx.fillStyle = '#5ef0ff';
+      sctx.beginPath(); sctx.arc(cx + Math.cos(a) * R, cy + Math.sin(a) * R, 3.5 * DPR, 0, TAU); sctx.fill();
+    }
+    const a = ang(scan.guide);
+    sctx.fillStyle = '#ffcf3f';
+    sctx.beginPath(); sctx.arc(cx + Math.cos(a) * R, cy + Math.sin(a) * R, 8 * DPR, 0, TAU); sctx.fill();
+    sctx.translate(cx, cy);
+    sctx.rotate(a - Math.PI / 2);
+    sctx.fillStyle = '#fff';
+    sctx.beginPath(); sctx.ellipse(0, 0, R * 0.42, R * 0.2, 0, 0, TAU); sctx.fill();
+    sctx.fillStyle = '#ffcf3f';
+    sctx.beginPath(); sctx.arc(0, R * 0.12, R * 0.15, 0, TAU); sctx.fill();
+    sctx.restore();
   }
 }
 
 // ======================================================================
-// The character
-// ======================================================================
-function drawCharacter(c, J, L, t, holo = 0) {
-  const u = J.u;
-  const lp = (a, b, f) => ({ x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f });
-  const skin = L.skin, shirt = L.shirt, pants = L.pants, hair = L.hair;
-  const shoes = L.shoes;
-  c.save();
-  c.lineJoin = 'round';
-  c.lineCap = 'round';
-
-  // ground shadow
-  c.fillStyle = 'rgba(30, 10, 50, 0.35)';
-  c.beginPath();
-  c.ellipse((J.aL.x + J.aR.x) / 2, Math.max(J.aL.y, J.aR.y) + 0.32 * u, Math.abs(J.aL.x - J.aR.x) / 2 + u * 1.1, u * 0.28, 0, 0, TAU);
-  c.fill();
-
-  // long hair falls behind everything above the shoulders
-  const headAng = A.tilt;
-  if (L.hairStyle === 'long') {
-    c.save();
-    c.translate(J.head.x, J.head.y);
-    c.rotate(headAng * 0.6);
-    cel(c, () => {
-      c.beginPath();
-      c.moveTo(-0.5 * u, -0.25 * u);
-      c.quadraticCurveTo(-0.72 * u, 0.9 * u, -0.6 * u, 1.45 * u);
-      c.lineTo(0.6 * u, 1.45 * u);
-      c.quadraticCurveTo(0.72 * u, 0.9 * u, 0.5 * u, -0.25 * u);
-      c.closePath();
-    }, hair, u);
-    c.restore();
-  }
-
-  // legs: shoes, then trousers (or skin with shorts)
-  for (const [k, a, ft, side] of [[J.kL, J.aL, A.ftL, -1], [J.kR, J.aR, A.ftR, 1]]) {
-    const toeA = Math.abs(Math.cos(ft)) > 0.2 ? ft : (side < 0 ? Math.PI - 0.35 : 0.35);
-    const tip = { x: a.x + Math.cos(toeA) * 0.55 * u, y: a.y + 0.25 * u + Math.max(0, Math.sin(toeA)) * 0.1 * u };
-    cel(c, () => {
-      c.beginPath();
-      c.ellipse((a.x + tip.x) / 2, a.y + 0.2 * u, 0.5 * u, 0.24 * u, Math.atan2(tip.y - a.y - 0.2 * u, tip.x - a.x) * 0.3, 0, TAU);
-    }, shoes, u, { shine: true });
-    // sole stripe
-    c.strokeStyle = hex(shadowOf(shoes));
-    c.lineWidth = u * 0.06;
-    c.beginPath();
-    c.moveTo(a.x - 0.4 * u * Math.sign(Math.cos(toeA) || 1) * -1, a.y + 0.36 * u);
-    c.lineTo(tip.x, a.y + 0.36 * u);
-    c.stroke();
-  }
-  for (const [h, k, a] of [[J.hL, J.kL, J.aL], [J.hR, J.kR, J.aR]]) {
-    if (L.shorts) {
-      cel(c, () => tubePath(c, [h, k, a], [0.36 * u, 0.27 * u, 0.2 * u]), skin, u);
-      cel(c, () => tubePath(c, [lp(h, k, -0.05), lp(h, k, 0.85)], [0.47 * u, 0.4 * u]), pants, u);
-    } else {
-      cel(c, () => tubePath(c, [h, k, lp(k, a, 1.05)], [0.46 * u, 0.36 * u, 0.3 * u]), pants, u, { shine: true });
-    }
-  }
-  // seat of the trousers joins the legs
-  cel(c, () => {
-    const up = { x: Math.cos(A.torso) * 0.55 * u, y: Math.sin(A.torso) * 0.55 * u };
-    c.beginPath();
-    c.moveTo(J.hL.x - 0.45 * u + up.x, J.hL.y + up.y);
-    c.lineTo(J.hR.x + 0.45 * u + up.x, J.hR.y + up.y);
-    c.lineTo(J.hR.x + 0.42 * u, J.hR.y + 0.35 * u);
-    c.quadraticCurveTo(J.hip.x, J.hip.y + 0.75 * u, J.hL.x - 0.42 * u, J.hL.y + 0.35 * u);
-    c.closePath();
-  }, pants, u, { ink: false });
-
-  // torso
-  const sOut = 0.2 * u;
-  const lineV = { x: Math.cos(A.sline), y: Math.sin(A.sline) };
-  const waistL = lp(J.sL, J.hL, 0.7), waistR = lp(J.sR, J.hR, 0.7);
-  const torsoPath = () => {
-    c.beginPath();
-    const nl = { x: J.shC.x - lineV.x * 0.32 * u, y: J.shC.y - lineV.y * 0.32 * u };
-    const nr = { x: J.shC.x + lineV.x * 0.32 * u, y: J.shC.y + lineV.y * 0.32 * u };
-    c.moveTo(nl.x, nl.y);
-    c.quadraticCurveTo(J.sL.x - lineV.x * sOut * 0.3, J.sL.y - 0.25 * u, J.sL.x - lineV.x * sOut, J.sL.y + 0.15 * u);
-    c.quadraticCurveTo(waistL.x - 0.05 * u, waistL.y, J.hL.x - 0.38 * u, J.hL.y - 0.25 * u);
-    c.quadraticCurveTo(J.hip.x, J.hip.y - 0.05 * u, J.hR.x + 0.38 * u, J.hR.y - 0.25 * u);
-    c.quadraticCurveTo(waistR.x + 0.05 * u, waistR.y, J.sR.x + lineV.x * sOut, J.sR.y + 0.15 * u);
-    c.quadraticCurveTo(J.sR.x + lineV.x * sOut * 0.3, J.sR.y - 0.25 * u, nr.x, nr.y);
-    c.quadraticCurveTo(J.shC.x, J.shC.y + 0.25 * u, nl.x, nl.y);
-    c.closePath();
-  };
-  // neck under the collar
-  cel(c, () => tubePath(c, [lp(J.shC, J.head, -0.05), lp(J.shC, J.head, 0.6)], [0.24 * u, 0.22 * u]), skin, u);
-  cel(c, torsoPath, shirt, u, { shine: true });
-  c.save();
-  torsoPath();
-  c.clip();
-  c.strokeStyle = INK;
-  c.lineWidth = u * 0.06;
-  if (L.longSleeves) {
-    // a jacket: zip line and open collar
-    c.beginPath();
-    c.moveTo(J.shC.x, J.shC.y + 0.2 * u);
-    c.lineTo(J.hip.x, J.hip.y - 0.2 * u);
-    c.stroke();
-    c.fillStyle = hex(shadowOf(shirt));
-    for (const s of [-1, 1]) {
-      c.beginPath();
-      c.moveTo(J.shC.x + s * 0.32 * u, J.shC.y - 0.02 * u);
-      c.lineTo(J.shC.x + s * 0.05 * u, J.shC.y + 0.55 * u);
-      c.lineTo(J.shC.x + s * 0.5 * u, J.shC.y + 0.25 * u);
-      c.closePath();
-      c.fill();
-      c.stroke();
-    }
-  } else {
-    // tee: a crew neck and a crease
-    c.strokeStyle = hex(shadowOf(shirt));
-    c.lineWidth = u * 0.05;
-    c.beginPath();
-    c.moveTo(lp(J.sL, J.hR, 0.45).x, lp(J.sL, J.hR, 0.45).y);
-    c.quadraticCurveTo(J.hip.x + 0.1 * u, J.hip.y - 1.0 * u, lp(J.sR, J.hR, 0.85).x - 0.2 * u, lp(J.sR, J.hR, 0.85).y);
-    c.stroke();
-  }
-  // belt
-  c.fillStyle = INK;
-  c.fillRect(Math.min(J.hL.x, J.hR.x) - u, J.hip.y - 0.42 * u, Math.abs(J.hR.x - J.hL.x) + 2 * u, 0.16 * u);
-  c.fillStyle = '#d9b44a';
-  c.fillRect(J.hip.x - 0.12 * u, J.hip.y - 0.44 * u, 0.24 * u, 0.2 * u);
-  c.restore();
-
-  // arms
-  for (const [s, e, w, hd] of [[J.sL, J.eL, J.wL, A.hdL], [J.sR, J.eR, J.wR, A.hdR]]) {
-    const wEnd = lp(e, w, 1.0);
-    if (L.longSleeves) {
-      cel(c, () => tubePath(c, [s, e, wEnd], [0.36 * u, 0.29 * u, 0.25 * u]), shirt, u, { shine: true });
-      // cuff
-      cel(c, () => tubePath(c, [lp(e, w, 0.86), lp(e, w, 1.0)], [0.27 * u, 0.27 * u]), shadowOf(shirt), u, { off: 0.05 });
-    } else {
-      cel(c, () => tubePath(c, [s, e, wEnd], [0.31 * u, 0.25 * u, 0.2 * u]), skin, u);
-      cel(c, () => tubePath(c, [lp(s, e, -0.1), lp(s, e, 0.55)], [0.4 * u, 0.33 * u]), shirt, u, { shine: true });
-    }
-    // hand: a mitten pointing along the fingers with a thumb
-    const ha = Math.abs(Math.atan2(Math.sin(hd - angOf(e, w)), Math.cos(hd - angOf(e, w)))) < 1.4 ? hd : angOf(e, w);
-    const hc = { x: w.x + Math.cos(ha) * 0.22 * u, y: w.y + Math.sin(ha) * 0.22 * u };
-    cel(c, () => {
-      c.beginPath();
-      c.ellipse(hc.x, hc.y, 0.27 * u, 0.21 * u, ha, 0, TAU);
-    }, skin, u, { off: 0.08 });
-    cel(c, () => {
-      const ta = ha + (w === J.wL ? -1.1 : 1.1);
-      c.beginPath();
-      c.ellipse(w.x + Math.cos(ta) * 0.2 * u, w.y + Math.sin(ta) * 0.2 * u, 0.13 * u, 0.08 * u, ta, 0, TAU);
-    }, skin, u, { off: 0.04 });
-  }
-
-  // head
-  c.save();
-  c.translate(J.head.x, J.head.y);
-  c.rotate(headAng);
-  c.translate(0, -0.06 * u);
-  c.scale(1.12, 1.12);
-  drawHead(c, L, u, t);
-  c.restore();
-
-  c.restore();
-
-  // hologram treatment while scanning: cyan wash and scanlines
-  if (holo > 0) {
-    c.save();
-    c.globalCompositeOperation = 'source-atop';
-    c.globalAlpha = holo;
-    c.fillStyle = 'rgba(80, 230, 255, 0.9)';
-    c.fillRect(0, 0, c.canvas.width, c.canvas.height);
-    c.globalAlpha = holo * 0.5;
-    c.fillStyle = 'rgba(255,255,255,0.8)';
-    for (let y = (t * 40) % 6; y < c.canvas.height; y += 6) c.fillRect(0, y, c.canvas.width, 1.5);
-    c.restore();
-  }
-}
-
-function drawHead(c, L, u, t) {
-  const skin = L.skin, hair = L.hair;
-  const yaw = A.yaw * 0.22 * u; // features slide as you turn your head
-  const hw = 0.42 * u, hh = 0.56 * u;
-  // ears
-  for (const s of [-1, 1]) cel(c, () => { c.beginPath(); c.ellipse(s * hw * 0.98 + yaw * 0.3, 0.05 * u, 0.1 * u, 0.15 * u, 0, 0, TAU); }, skin, u, { off: 0.04 });
-  const face = () => {
-    c.beginPath();
-    c.moveTo(-hw, -0.1 * u);
-    c.bezierCurveTo(-hw, -hh * 1.15, hw, -hh * 1.15, hw, -0.1 * u);
-    c.bezierCurveTo(hw * 1.02, 0.22 * u, hw * 0.75, 0.42 * u, 0.12 * u + yaw * 0.3, hh * 0.98);
-    c.quadraticCurveTo(yaw * 0.3, hh * 1.04, -0.12 * u + yaw * 0.3, hh * 0.98);
-    c.bezierCurveTo(-hw * 0.75, 0.42 * u, -hw * 1.02, 0.22 * u, -hw, -0.1 * u);
-    c.closePath();
-  };
-  cel(c, face, skin, u, { off: 0.12 });
-
-  const fx = yaw;
-  // brows: thick and confident
-  c.strokeStyle = hex(mix(hair, [20, 10, 20], 0.35));
-  c.lineWidth = u * 0.075;
-  for (const s of [-1, 1]) {
-    c.beginPath();
-    c.moveTo(fx + s * 0.07 * u, -0.1 * u);
-    c.quadraticCurveTo(fx + s * 0.18 * u, -0.17 * u, fx + s * 0.3 * u, -0.12 * u);
-    c.stroke();
-  }
-  if (L.shades) {
-    c.fillStyle = INK;
-    for (const s of [-1, 1]) {
-      c.beginPath();
-      c.moveTo(fx + s * 0.04 * u, -0.06 * u);
-      c.lineTo(fx + s * 0.33 * u, -0.08 * u);
-      c.quadraticCurveTo(fx + s * 0.32 * u, 0.1 * u, fx + s * 0.2 * u, 0.1 * u);
-      c.quadraticCurveTo(fx + s * 0.06 * u, 0.1 * u, fx + s * 0.04 * u, -0.06 * u);
-      c.fill();
-    }
-    c.fillRect(fx - 0.05 * u, -0.07 * u, 0.1 * u, 0.03 * u);
-    c.strokeStyle = 'rgba(255,255,255,0.75)';
-    c.lineWidth = u * 0.025;
-    for (const s of [-1, 1]) { c.beginPath(); c.moveTo(fx + s * 0.12 * u, -0.03 * u); c.lineTo(fx + s * 0.2 * u, 0.05 * u); c.stroke(); }
-  } else {
-    for (const s of [-1, 1]) {
-      const ex = fx + s * 0.18 * u, ey = 0.0;
-      c.fillStyle = '#fff';
-      c.beginPath(); c.ellipse(ex, ey, 0.1 * u, 0.055 * u, 0, 0, TAU); c.fill();
-      c.fillStyle = '#3a2416';
-      c.beginPath(); c.arc(ex + A.yaw * 0.04 * u, ey, 0.045 * u, 0, TAU); c.fill();
-      c.fillStyle = INK;
-      c.beginPath(); c.arc(ex + A.yaw * 0.04 * u, ey, 0.022 * u, 0, TAU); c.fill();
-      c.fillStyle = '#fff';
-      c.beginPath(); c.arc(ex + A.yaw * 0.04 * u - 0.015 * u, ey - 0.018 * u, 0.012 * u, 0, TAU); c.fill();
-      // upper lid line
-      c.strokeStyle = INK;
-      c.lineWidth = u * 0.04;
-      c.beginPath(); c.ellipse(ex, ey, 0.1 * u, 0.055 * u, 0, Math.PI * 1.05, Math.PI * 1.95); c.stroke();
-    }
-  }
-  // nose and mouth: a little smirk
-  c.strokeStyle = hex(shadowOf(skin));
-  c.lineWidth = u * 0.045;
-  c.beginPath(); c.moveTo(fx + 0.02 * u, 0.06 * u); c.lineTo(fx + 0.05 * u, 0.2 * u); c.lineTo(fx - 0.03 * u, 0.22 * u); c.stroke();
-  c.strokeStyle = INK;
-  c.lineWidth = u * 0.045;
-  c.beginPath(); c.moveTo(fx - 0.12 * u, 0.34 * u); c.quadraticCurveTo(fx + 0.02 * u, 0.37 * u, fx + 0.14 * u, 0.31 * u); c.stroke();
-
-  // hair on top
-  const hs = L.hairStyle;
-  if (hs === 'cap') {
-    const capC = L.capColor || mix(L.shirt, [255, 255, 255], 0.15);
-    cel(c, () => {
-      c.beginPath();
-      c.moveTo(-hw * 1.08, -0.1 * u);
-      c.bezierCurveTo(-hw * 1.05, -hh * 1.35, hw * 1.05, -hh * 1.35, hw * 1.08, -0.1 * u);
-      c.closePath();
-    }, capC, u, { shine: true });
-    cel(c, () => { c.beginPath(); c.ellipse(fx * 0.6 + 0.05 * u, -0.1 * u, hw * 1.15, 0.09 * u, 0, 0, TAU); }, shadowOf(capC), u, { off: 0.03 });
-  } else if (hs === 'buzz') {
-    cel(c, () => {
-      c.beginPath();
-      c.moveTo(-hw * 1.02, -0.05 * u);
-      c.bezierCurveTo(-hw * 1.04, -hh * 1.22, hw * 1.04, -hh * 1.22, hw * 1.02, -0.05 * u);
-      c.quadraticCurveTo(hw * 0.7, -0.32 * u, 0, -0.33 * u);
-      c.quadraticCurveTo(-hw * 0.7, -0.32 * u, -hw * 1.02, -0.05 * u);
-      c.closePath();
-    }, hair, u, { off: 0.06 });
-  } else {
-    // swept fringe with a few chunky spikes
-    cel(c, () => {
-      c.beginPath();
-      c.moveTo(-hw * 1.1, 0.05 * u);
-      c.bezierCurveTo(-hw * 1.25, -hh * 1.45, hw * 1.25, -hh * 1.5, hw * 1.12, 0.0);
-      c.lineTo(hw * 0.95, -0.2 * u);
-      c.quadraticCurveTo(hw * 0.6, -0.22 * u, hw * 0.45, -0.38 * u);
-      c.quadraticCurveTo(hw * 0.1, -0.2 * u, -hw * 0.2, -0.3 * u);
-      c.quadraticCurveTo(-hw * 0.55, -0.15 * u, -hw * 0.85, -0.22 * u);
-      c.closePath();
-    }, hair, u, { shine: true, off: 0.1 });
-    if (hs === 'bun') cel(c, () => { c.beginPath(); c.arc(0, -hh * 1.2, 0.2 * u, 0, TAU); }, hair, u, { off: 0.06 });
-  }
-}
-
-// ======================================================================
-// Backdrop: an original sunset city
+// Backdrop: an original sunset city (2D canvas behind the 3D view)
 // ======================================================================
 function paintCity(c, w, h, s) {
   const g = c.createLinearGradient(0, 0, 0, h);
@@ -560,35 +478,29 @@ function paintCity(c, w, h, s) {
   g.addColorStop(1, '#ffc46b');
   c.fillStyle = g;
   c.fillRect(0, 0, w, h);
-  const hz = h * 0.72; // horizon
-  // sun with sliced bands
+  const hz = h * 0.7;
   const sr = Math.min(w, h) * 0.22;
   const sg = c.createLinearGradient(0, hz - sr * 1.6, 0, hz);
   sg.addColorStop(0, '#fff2a8');
   sg.addColorStop(1, '#ff7a45');
   c.save();
-  c.beginPath();
-  c.arc(w * 0.5, hz - sr * 0.35, sr, 0, TAU);
-  c.clip();
+  c.beginPath(); c.arc(w * 0.5, hz - sr * 0.35, sr, 0, TAU); c.clip();
   c.fillStyle = sg;
   c.fillRect(w * 0.5 - sr, hz - sr * 1.6, sr * 2, sr * 2);
   c.fillStyle = '#ff8a4c';
-  for (let i = 0; i < 6; i++) { const y = hz - sr * 0.55 + i * sr * 0.16; c.fillRect(w * 0.5 - sr, y, sr * 2, sr * 0.025 * (i + 1)); }
+  for (let i = 0; i < 6; i++) c.fillRect(w * 0.5 - sr, hz - sr * 0.55 + i * sr * 0.16, sr * 2, sr * 0.025 * (i + 1));
   c.restore();
-  // halftone dots in the upper sky
   c.fillStyle = 'rgba(255, 255, 255, 0.07)';
   const step = 14 * s;
   for (let y = 0; y < h * 0.4; y += step) for (let x = (y / step) % 2 ? step / 2 : 0; x < w; x += step) {
-    const r = (1 - y / (h * 0.4)) * 3.2 * s;
-    c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill();
+    c.beginPath(); c.arc(x, y, (1 - y / (h * 0.4)) * 3.2 * s, 0, TAU); c.fill();
   }
-  // skyline: two layers of towers
-  const rng = (() => { let a = 11; return () => { a = (a * 16807) % 2147483647; return a / 2147483647; }; })();
+  let a = 11;
+  const rng = () => { a = (a * 16807) % 2147483647; return a / 2147483647; };
   for (const [col, hmul, win] of [['#7a2f6e', 0.32, 0.25], ['#3d1a52', 0.22, 0.6]]) {
     let x = -10;
     while (x < w + 10) {
-      const bw = (30 + rng() * 70) * s;
-      const bh = h * hmul * (0.35 + rng() * 0.75);
+      const bw = (30 + rng() * 70) * s, bh = h * hmul * (0.35 + rng() * 0.75);
       c.fillStyle = col;
       c.fillRect(x, hz - bh, bw - 3 * s, bh);
       if (rng() < 0.35) c.fillRect(x + bw * 0.4, hz - bh - 18 * s, 3 * s, 18 * s);
@@ -597,179 +509,112 @@ function paintCity(c, w, h, s) {
       x += bw;
     }
   }
-  // palms
   const palm = (px, ph, lean) => {
     c.strokeStyle = '#24102f';
     c.lineWidth = 9 * s;
     c.lineCap = 'round';
-    c.beginPath();
-    c.moveTo(px, h * 0.86);
-    c.quadraticCurveTo(px + lean * 0.5, h * 0.86 - ph * 0.5, px + lean, h * 0.86 - ph);
-    c.stroke();
+    c.beginPath(); c.moveTo(px, h * 0.86); c.quadraticCurveTo(px + lean * 0.5, h * 0.86 - ph * 0.5, px + lean, h * 0.86 - ph); c.stroke();
     c.fillStyle = '#24102f';
     const tx = px + lean, ty = h * 0.86 - ph;
     for (let i = 0; i < 7; i++) {
-      const a = -Math.PI / 2 + (i - 3) * 0.55;
+      const an = -Math.PI / 2 + (i - 3) * 0.55;
       c.beginPath();
       c.moveTo(tx, ty);
-      c.quadraticCurveTo(tx + Math.cos(a - 0.4) * ph * 0.35, ty + Math.sin(a - 0.4) * ph * 0.35 - 10 * s, tx + Math.cos(a) * ph * 0.42, ty + Math.sin(a) * ph * 0.42 + ph * 0.12);
-      c.quadraticCurveTo(tx + Math.cos(a + 0.2) * ph * 0.25, ty + Math.sin(a + 0.2) * ph * 0.25, tx, ty);
+      c.quadraticCurveTo(tx + Math.cos(an - 0.4) * ph * 0.35, ty + Math.sin(an - 0.4) * ph * 0.35 - 10 * s, tx + Math.cos(an) * ph * 0.42, ty + Math.sin(an) * ph * 0.42 + ph * 0.12);
+      c.quadraticCurveTo(tx + Math.cos(an + 0.2) * ph * 0.25, ty + Math.sin(an + 0.2) * ph * 0.25, tx, ty);
       c.fill();
     }
   };
-  palm(w * 0.12, h * 0.5, 40 * s);
-  palm(w * 0.2, h * 0.36, -25 * s);
-  palm(w * 0.88, h * 0.55, -45 * s);
-  // street
+  palm(w * 0.1, h * 0.5, 40 * s);
+  palm(w * 0.18, h * 0.36, -25 * s);
+  palm(w * 0.9, h * 0.55, -45 * s);
   const rg = c.createLinearGradient(0, hz, 0, h);
   rg.addColorStop(0, '#3a2348');
   rg.addColorStop(1, '#1f1029');
   c.fillStyle = rg;
   c.fillRect(0, hz, w, h - hz);
-  c.strokeStyle = 'rgba(255, 200, 90, 0.85)';
-  c.lineWidth = 4 * s;
-  for (let i = 0; i < 9; i++) {
-    const f0 = i / 9, f1 = (i + 0.5) / 9;
-    const y0 = hz + (h - hz) * f0 * f0, y1 = hz + (h - hz) * f1 * f1;
-    c.lineWidth = (1 + f1 * 6) * s;
-    c.beginPath(); c.moveTo(w / 2, y0); c.lineTo(w / 2, y1); c.stroke();
-  }
   c.strokeStyle = 'rgba(255, 255, 255, 0.25)';
   c.lineWidth = 2 * s;
   for (const sx of [-1, 1]) { c.beginPath(); c.moveTo(w / 2 + sx * w * 0.06, hz); c.lineTo(w / 2 + sx * w * 0.9, h); c.stroke(); }
-  // sidewalk the hero stands on
-  c.fillStyle = 'rgba(255,255,255,0.06)';
-  c.fillRect(0, h * 0.86, w, h * 0.14);
 }
 
 // ======================================================================
-// Scanning: sample colours from the camera at body regions
+// Poster, title and export
 // ======================================================================
-const sampler = document.createElement('canvas');
-const sampCtx = sampler.getContext('2d', { willReadFrequently: true });
-let scan = { state: 'waiting', t: 0, seenT: 0, samples: {} };
-
-function samplePatch(img, w, h, x, y, r = 3) {
-  const px = Math.round(x * w), py = Math.round(y * h);
-  if (px < r || py < r || px >= w - r || py >= h - r) return null;
-  const out = [];
-  for (let dy = -r; dy <= r; dy += 2) for (let dx = -r; dx <= r; dx += 2) {
-    const i = ((py + dy) * w + (px + dx)) * 4;
-    out.push([img[i], img[i + 1], img[i + 2]]);
+const COLOR_NAMES = [
+  ['CRIMSON', [190, 30, 45]], ['SCARLET', [235, 60, 40]], ['TANGERINE', [240, 130, 40]], ['GOLDEN', [230, 190, 50]],
+  ['LIME', [140, 200, 60]], ['JADE', [40, 150, 100]], ['TEAL', [30, 140, 150]], ['SKY', [90, 170, 230]],
+  ['COBALT', [40, 80, 180]], ['MIDNIGHT', [25, 30, 70]], ['VIOLET', [120, 60, 180]], ['ROSE', [230, 110, 160]],
+  ['IVORY', [235, 230, 215]], ['SILVER', [170, 170, 175]], ['SHADOW', [40, 40, 45]], ['DESERT', [190, 150, 100]],
+  ['COCOA', [110, 70, 45]], ['OLIVE', [110, 115, 60]], ['DENIM', [70, 95, 140]],
+];
+const NOUNS = ['ACE', 'RIDER', 'MAVERICK', 'LEGEND', 'DRIFTER', 'NIGHTHAWK', 'HUSTLE', 'BOSS', 'ROOKIE', 'WILDCARD', 'COMET', 'NOMAD'];
+const cdist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+let shirtColor = [200, 60, 80];
+function chestColor(front) {
+  const { lm, w, h, rgba } = front;
+  if (!rgba) return shirtColor;
+  const p = { x: ((lm[11].x + lm[12].x) / 2) * 0.65 + ((lm[23].x + lm[24].x) / 2) * 0.35, y: ((lm[11].y + lm[12].y) / 2) * 0.65 + ((lm[23].y + lm[24].y) / 2) * 0.35 };
+  const ch = [[], [], []];
+  for (let dy = -6; dy <= 6; dy += 3) for (let dx = -6; dx <= 6; dx += 3) {
+    const x = Math.round(p.x * w) + dx, y = Math.round(p.y * h) + dy;
+    if (x < 0 || y < 0 || x >= w || y >= h) continue;
+    const o = (y * w + x) * 4;
+    for (let k = 0; k < 3; k++) ch[k].push(rgba[o + k]);
   }
+  return ch.map((a) => a.sort((m, n) => m - n)[Math.floor(a.length / 2)] ?? 120);
+}
+function makeTitle(front) {
+  if (front?.rgba) shirtColor = chestColor(front);
+  const c = shirtColor;
+  const name = COLOR_NAMES.reduce((best, n) => (cdist(n[1], c) < cdist(best[1], c) ? n : best))[0];
+  return name + ' ' + NOUNS[Math.floor(Math.random() * NOUNS.length)];
+}
+function mulberry(a) {
+  return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+function starPath(c, x, y, r) {
+  c.beginPath();
+  for (let i = 0; i < 10; i++) { const an = (i / 10) * TAU - Math.PI / 2; const rr = i % 2 ? r * 0.45 : r; c.lineTo(x + Math.cos(an) * rr, y + Math.sin(an) * rr); }
+  c.closePath();
+}
+function rgbHue([r, g, b]) {
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+  if (mx === mn) return 0;
+  const d = mx - mn;
+  const h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return h * 60;
+}
+
+// the character alone, cropped from the 3D view
+function snapshot(px = 900) {
+  const prevVis = shadow.visible;
+  shadow.visible = false;
+  renderer.render(scene, camera);
+  const w = renderer.domElement.width, h = renderer.domElement.height;
+  const pts = [[-0.48, -0.02], [0.48, -0.02], [-0.48, 1.07], [0.48, 1.07]].map(([x, y]) => new THREE.Vector3(x, y, 0).project(camera));
+  const xs = pts.map((p) => (p.x * 0.5 + 0.5) * w), ys = pts.map((p) => (1 - (p.y * 0.5 + 0.5)) * h);
+  const x0 = Math.max(0, Math.min(...xs)), x1 = Math.min(w, Math.max(...xs)), y0 = Math.max(0, Math.min(...ys)), y1 = Math.min(h, Math.max(...ys));
+  const out = document.createElement('canvas');
+  out.width = px;
+  out.height = Math.round((px * (y1 - y0)) / (x1 - x0));
+  out.getContext('2d').drawImage(renderer.domElement, x0, y0, x1 - x0, y1 - y0, 0, 0, out.width, out.height);
+  shadow.visible = prevVis;
   return out;
 }
-function median(list) {
-  if (!list.length) return null;
-  const ch = [0, 1, 2].map((k) => list.map((c) => c[k]).sort((a, b) => a - b)[Math.floor(list.length / 2)]);
-  return ch;
-}
 
-function sampleFrame(lm) {
-  const vw = video.videoWidth, vh = video.videoHeight;
-  if (!vw) return;
-  const w = 240, h = Math.round((240 * vh) / vw);
-  sampler.width = w;
-  sampler.height = h;
-  sampCtx.drawImage(video, 0, 0, w, h);
-  const img = sampCtx.getImageData(0, 0, w, h).data;
-  const P = (i) => lm[i];
-  const vis = (...ids) => ids.every((i) => lm[i].v > 0.5);
-  const at = (a, b, f, dx = 0, dy = 0) => ({ x: a.x + (b.x - a.x) * f + dx, y: a.y + (b.y - a.y) * f + dy });
-  const add = (key, pt, r = 3) => {
-    const s = samplePatch(img, w, h, pt.x, pt.y, r);
-    if (s) (scan.samples[key] ||= []).push(...s);
-  };
-  const earW = Math.hypot(P(7).x - P(8).x, P(7).y - P(8).y);
-  if (vis(0, 7, 8)) {
-    // cheeks for skin, above the forehead for hair, beside the jaw to tell long hair
-    add('skin', at(P(0), P(7), 0.4, 0, earW * 0.12), 2);
-    add('skin', at(P(0), P(8), 0.4, 0, earW * 0.12), 2);
-    const eyes = at(P(2), P(5), 0.5);
-    add('hair', { x: eyes.x, y: eyes.y - earW * 0.62 }, 2);
-    add('hair', { x: eyes.x + earW * 0.25, y: eyes.y - earW * 0.5 }, 2);
-    add('hair', { x: eyes.x - earW * 0.25, y: eyes.y - earW * 0.5 }, 2);
-    add('besideJaw', { x: P(7).x + (P(7).x - P(8).x) * 0.12, y: P(7).y + earW * 0.55 }, 2);
-    add('besideJaw', { x: P(8).x - (P(7).x - P(8).x) * 0.12, y: P(8).y + earW * 0.55 }, 2);
-    add('bg', { x: eyes.x + earW * 1.6, y: eyes.y - earW * 0.4 }, 2);
-    add('bg', { x: eyes.x - earW * 1.6, y: eyes.y - earW * 0.4 }, 2);
-  }
-  if (vis(11, 12)) {
-    const sm = at(P(11), P(12), 0.5);
-    const hipOk = vis(23, 24);
-    const hm = hipOk ? at(P(23), P(24), 0.5) : { x: sm.x, y: sm.y + Math.abs(P(11).x - P(12).x) * 1.2 };
-    add('shirt', at(sm, hm, 0.3), 4);
-    add('shirt', at(at(P(11), sm, 0.35), hm, 0.45), 3);
-    add('shirt', at(at(P(12), sm, 0.35), hm, 0.45), 3);
-  }
-  for (const [s, e, wr] of [[11, 13, 15], [12, 14, 16]]) {
-    if (vis(s, e)) add('upperArm', at(P(s), P(e), 0.45), 2);
-    if (vis(e, wr)) add('forearm', at(P(e), P(wr), 0.55), 2);
-  }
-  for (const [hp, kn, an, toe] of [[23, 25, 27, 31], [24, 26, 28, 32]]) {
-    if (vis(hp, kn)) add('thigh', at(P(hp), P(kn), 0.45), 3);
-    if (vis(kn, an)) add('shin', at(P(kn), P(an), 0.55), 2);
-    if (vis(an, toe)) add('shoes', at(P(an), P(toe), 0.5), 2);
-  }
-}
-
-function finishScan() {
-  const m = (k) => median(scan.samples[k] || []);
-  const L = { ...DEFAULT_LOOK };
-  const skin = m('skin'), hair = m('hair'), shirt = m('shirt'), fore = m('forearm'), thigh = m('thigh'), shin = m('shin'), shoes = m('shoes'), jaw = m('besideJaw'), bgc = m('bg');
-  if (skin) L.skin = stylize(skin, 1.05, 0.2, 0.86);
-  if (hair) L.hair = stylize(hair, 1.1, 0.08, 0.8);
-  if (shirt) L.shirt = stylize(shirt, 1.25);
-  if (thigh) L.pants = stylize(thigh, 1.2);
-  if (shoes) L.shoes = stylize(shoes, 1.1, 0.12, 0.92);
-  // hair that looks like the background is probably background: fall back to dark hair
-  if (hair && bgc && cdist(hair, bgc) < 30) L.hair = DEFAULT_LOOK.hair;
-  if (fore && skin && shirt) L.longSleeves = cdist(fore, shirt) < cdist(fore, skin) * 0.9;
-  if (shin && skin && thigh) L.shorts = cdist(shin, skin) < cdist(shin, thigh) * 0.75 && cdist(thigh, skin) > 40;
-  if (jaw && hair && skin) L.longHair = cdist(jaw, hair) < cdist(jaw, skin) && cdist(jaw, hair) < 55 && (!bgc || cdist(jaw, bgc) > 35);
-  L.hairStyle = L.longHair ? 'long' : 'short';
-  L.partial = !thigh;
-  if (!shoes) L.shoes = DEFAULT_LOOK.shoes;
-  L.title = makeTitle(L);
-  L.seed = Math.floor(Math.random() * 1e6);
-  look = L;
-  showSwatches();
-  ['btn-hair', 'btn-shades', 'btn-poster'].forEach((id) => ($(id).disabled = false));
-  reveal = 0;
-  S.done();
-}
-
-function showSwatches() {
-  if (!look) { swatchesEl.hidden = true; return; }
-  const row = (name, c) => `<div><i style="background:${hex(c)}"></i>${name}</div>`;
-  swatchesEl.innerHTML = row('Hair', look.hair) + row('Skin', look.skin) + row(look.longSleeves ? 'Jacket' : 'Tee', look.shirt) + row(look.shorts ? 'Shorts' : 'Trousers', look.pants) + row('Shoes', look.shoes);
-  swatchesEl.hidden = false;
-}
-
-const NOUNS = ['ACE', 'RIDER', 'MAVERICK', 'LEGEND', 'DRIFTER', 'NIGHTHAWK', 'HUSTLE', 'BOSS', 'ROOKIE', 'WILDCARD', 'COMET', 'NOMAD'];
-function makeTitle(L) {
-  return colorName(L.shirt) + ' ' + NOUNS[Math.floor(Math.random() * NOUNS.length)];
-}
-
-// ======================================================================
-// Poster
-// ======================================================================
 async function makePoster() {
-  if (!look) return;
+  if (!model) return null;
   try { await document.fonts.load('80px Anton'); } catch (e) { /* fallback font */ }
   const PW = 1080, PH = 1350;
   const pc = document.createElement('canvas');
-  pc.width = PW;
-  pc.height = PH;
+  pc.width = PW; pc.height = PH;
   const c = pc.getContext('2d');
-  // two bold panels split on a diagonal, colours from the outfit
-  const [h] = rgb2hsl(look.shirt);
-  const a = hsl2rgb([(h + 0.5) % 1, 0.65, 0.55]), b = hsl2rgb([(h + 0.08) % 1, 0.75, 0.6]);
-  c.fillStyle = hex(a);
+  const hue = rgbHue(shirtColor);
+  c.fillStyle = `hsl(${(hue + 180) % 360}, 65%, 55%)`;
   c.fillRect(0, 0, PW, PH);
-  c.fillStyle = hex(b);
+  c.fillStyle = `hsl(${(hue + 30) % 360}, 75%, 60%)`;
   c.beginPath(); c.moveTo(PW * 0.55, 0); c.lineTo(PW, 0); c.lineTo(PW, PH); c.lineTo(PW * 0.25, PH); c.closePath(); c.fill();
-  // sun disc and halftone
   c.fillStyle = 'rgba(255, 240, 180, 0.55)';
   c.beginPath(); c.arc(PW * 0.62, PH * 0.38, PW * 0.36, 0, TAU); c.fill();
   c.fillStyle = 'rgba(26, 13, 42, 0.12)';
@@ -777,42 +622,30 @@ async function makePoster() {
     const r = 5 * clamp01(1 - Math.hypot(x - PW * 0.2, y - PH * 0.9) / (PW * 0.9));
     if (r > 0.3) { c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill(); }
   }
-  // the character, big, with a white sticker outline
-  const u = PH * 0.7 / 8.4;
-  const J = buildJoints(PW * 0.6, PH * 0.92, u, look.build);
-  const layer = document.createElement('canvas');
-  layer.width = PW; layer.height = PH;
-  const lc = layer.getContext('2d');
-  drawCharacter(lc, J, look, performance.now() / 1000);
-  const sil = document.createElement('canvas');
-  sil.width = PW; sil.height = PH;
-  const sc = sil.getContext('2d');
-  sc.drawImage(layer, 0, 0);
-  sc.globalCompositeOperation = 'source-in';
-  sc.fillStyle = '#ffffff';
-  sc.fillRect(0, 0, PW, PH);
-  c.save();
+  // the 3D character with a white sticker edge
+  const shot = snapshot(900);
+  const ch = PH * 0.86, cw = (shot.width / shot.height) * ch;
+  const cx = PW * 0.6 - cw / 2, cy = PH * 0.97 - ch;
+  const tint = (color) => {
+    const cv = document.createElement('canvas');
+    cv.width = shot.width; cv.height = shot.height;
+    const x = cv.getContext('2d');
+    x.drawImage(shot, 0, 0);
+    x.globalCompositeOperation = 'source-in';
+    x.fillStyle = color;
+    x.fillRect(0, 0, cv.width, cv.height);
+    return cv;
+  };
+  const sil = tint('#ffffff'), dark = tint(INK);
   c.globalAlpha = 0.35;
-  c.filter = 'none';
-  // drop shadow
-  const dsh = document.createElement('canvas');
-  dsh.width = PW; dsh.height = PH;
-  const dc = dsh.getContext('2d');
-  dc.drawImage(layer, 0, 0);
-  dc.globalCompositeOperation = 'source-in';
-  dc.fillStyle = INK;
-  dc.fillRect(0, 0, PW, PH);
-  c.drawImage(dsh, 18, 14);
-  c.restore();
-  for (let i = 0; i < 16; i++) { const an = (i / 16) * TAU; c.drawImage(sil, Math.cos(an) * 12, Math.sin(an) * 12); }
-  c.drawImage(layer, 0, 0);
-
-  // title block
-  const words = look.title.split(' ');
+  c.drawImage(dark, cx + 18, cy + 14, cw, ch);
+  c.globalAlpha = 1;
+  for (let i = 0; i < 16; i++) { const an = (i / 16) * TAU; c.drawImage(sil, cx + Math.cos(an) * 10, cy + Math.sin(an) * 10, cw, ch); }
+  c.drawImage(shot, cx, cy, cw, ch);
+  const words = model.title.split(' ');
   c.save();
   c.translate(60, PH * 0.73);
   c.rotate(-0.07);
-  c.textBaseline = 'alphabetic';
   c.lineJoin = 'round';
   words.forEach((wd, i) => {
     const size = i === 0 ? 120 : 170;
@@ -825,10 +658,8 @@ async function makePoster() {
     c.fillText(wd, 0, y);
   });
   c.restore();
-
-  // stats card
-  const rng = mulberry(look.seed);
-  const stats = [['STAMINA', 0], ['DRIVING', 0], ['STEALTH', 0], ['STYLE', 0], ['LUCK', 0]].map(([n]) => [n, 45 + Math.floor(rng() * 55)]);
+  const rng = mulberry(model.seed || (model.seed = Math.floor(Math.random() * 1e6)));
+  const stats = ['STAMINA', 'DRIVING', 'STEALTH', 'STYLE', 'LUCK'].map((n) => [n, 45 + Math.floor(rng() * 55)]);
   c.save();
   c.translate(56, 70);
   c.fillStyle = 'rgba(26, 13, 42, 0.85)';
@@ -849,21 +680,17 @@ async function makePoster() {
     c.fillRect(160, y, 190 * (v / 100), 18);
   });
   c.restore();
-  // reputation stars
   const rep = 2 + Math.floor(rng() * 4);
   for (let i = 0; i < 5; i++) {
     c.fillStyle = i < rep ? '#ffcf3f' : 'rgba(26,13,42,0.35)';
     c.strokeStyle = INK;
     c.lineWidth = 5;
     starPath(c, PW - 330 + i * 62, 110, 26);
-    c.fill();
-    c.stroke();
+    c.fill(); c.stroke();
   }
   c.font = '26px Anton, Impact, sans-serif';
   c.fillStyle = INK;
   c.fillText('REPUTATION', PW - 360, 170);
-  // footer
-  c.fillStyle = INK;
   c.fillRect(0, PH - 64, PW, 64);
   c.font = '30px Anton, Impact, sans-serif';
   c.fillStyle = '#fff';
@@ -874,29 +701,37 @@ async function makePoster() {
   c.fillText('made with Mood Garden', PW - 32, PH - 26);
   return pc;
 }
-function starPath(c, x, y, r) {
-  c.beginPath();
-  for (let i = 0; i < 10; i++) { const a = (i / 10) * TAU - Math.PI / 2; const rr = i % 2 ? r * 0.45 : r; c.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); }
-  c.closePath();
-}
-function mulberry(a) {
-  return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
-}
 
 let posterUrl = null;
 async function openPoster(newTitle) {
-  if (newTitle && look) look.title = makeTitle(look);
+  if (!model) return;
+  if (newTitle) model.title = makeTitle(null);
   const pc = await makePoster();
-  if (!pc) return;
   pc.toBlob((blob) => {
     if (posterUrl) URL.revokeObjectURL(posterUrl);
     posterUrl = URL.createObjectURL(blob);
     $('poster-img').src = posterUrl;
     $('poster-save').href = posterUrl;
-    $('poster-save').download = look.title.toLowerCase().replace(/\s+/g, '-') + '-poster.png';
+    $('poster-save').download = model.title.toLowerCase().replace(/\s+/g, '-') + '-poster.png';
     $('poster-view').hidden = false;
   }, 'image/png');
   S.shutter();
+}
+
+function glbBlob() {
+  const colors = S3.bakeColors(model.meshData, model.weights, model.views, model.atlasInfo.atlas);
+  return S3.toGLB(model.meshData.positions, model.normals, colors, model.meshData.indices);
+}
+function saveGLB() {
+  if (!model) return;
+  const url = URL.createObjectURL(glbBlob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = (model.title || 'avatar').toLowerCase().replace(/\s+/g, '-') + '.glb';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
 // ======================================================================
@@ -904,7 +739,8 @@ async function openPoster(newTitle) {
 // ======================================================================
 const sfx = new Sfx();
 const S = {
-  tick(p) { sfx.tone({ type: 'square', freqs: [[0, 400 + p * 800]], dur: 0.04, gain: 0.03 }); },
+  tick(p) { sfx.tone({ type: 'square', freqs: [[0, 400 + p * 800]], dur: 0.05, gain: 0.04 }); },
+  go() { sfx.tone({ type: 'sine', freqs: [[0, 660], [0.2, 990]], dur: 0.3, gain: 0.15 }); },
   done() {
     sfx.hiss({ dur: 0.5, gain: 0.15, freq: 3000, q: 0.5 });
     [392, 523, 659, 784].forEach((f, i) => sfx.tone({ type: 'sawtooth', freqs: [[0, f]], dur: 0.3, gain: 0.05, delay: i * 0.08, filter: 1800, q: 0.7 }));
@@ -914,58 +750,10 @@ const S = {
 };
 
 // ======================================================================
-// Scanner overlay on the camera inset
+// Loop and UI
 // ======================================================================
-function drawScanOverlay(pose, t) {
-  const cw = scanCv.width, ch = scanCv.height;
-  sctx.setTransform(1, 0, 0, 1, 0, 0);
-  sctx.clearRect(0, 0, cw, ch);
-  if (!pose) return;
-  // the inset shows the camera with object-fit: cover, mirrored by CSS like the video
-  const vw = video.videoWidth || 1280, vh = video.videoHeight || 720;
-  const s = Math.max(cw / vw, ch / vh);
-  const ox = (vw * s - cw) / 2, oy = (vh * s - ch) / 2;
-  const pt = (p) => ({ x: p.x * vw * s - ox, y: p.y * vh * s - oy });
-  const lm = pose.lm;
-  const scanning = scan.state === 'scanning';
-  sctx.strokeStyle = scanning ? 'rgba(90, 240, 255, 0.95)' : look ? 'rgba(255, 207, 63, 0.9)' : 'rgba(255,255,255,0.8)';
-  sctx.lineWidth = 2 * DPR;
-  sctx.lineCap = 'round';
-  const bones = [[11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24], [23, 25], [25, 27], [24, 26], [26, 28], [27, 31], [28, 32]];
-  for (const [a, b] of bones) {
-    if (lm[a].v < 0.5 || lm[b].v < 0.5) continue;
-    const p = pt(lm[a]), q = pt(lm[b]);
-    sctx.beginPath(); sctx.moveTo(p.x, p.y); sctx.lineTo(q.x, q.y); sctx.stroke();
-  }
-  sctx.fillStyle = sctx.strokeStyle;
-  for (const i of [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28]) {
-    if (lm[i].v < 0.5) continue;
-    const p = pt(lm[i]);
-    sctx.beginPath(); sctx.arc(p.x, p.y, 3 * DPR, 0, TAU); sctx.fill();
-  }
-  if (scanning) {
-    // laser sweeping down and up
-    const f = (Math.sin(t * 3) * 0.5 + 0.5);
-    const y = f * ch;
-    const g = sctx.createLinearGradient(0, y - 30 * DPR, 0, y + 4 * DPR);
-    g.addColorStop(0, 'rgba(90, 240, 255, 0)');
-    g.addColorStop(1, 'rgba(90, 240, 255, 0.45)');
-    sctx.fillStyle = g;
-    sctx.fillRect(0, y - 30 * DPR, cw, 34 * DPR);
-    sctx.fillStyle = 'rgba(200, 255, 255, 0.95)';
-    sctx.fillRect(0, y, cw, 2 * DPR);
-  }
-}
-
-// ======================================================================
-// Main loop
-// ======================================================================
-let reveal = 1; // 0..1 wipe from hologram to the finished character
 function setStatus(st, text) { if (statusEl.dataset.state !== st) statusEl.dataset.state = st; if (statusText.textContent !== text) statusText.textContent = text; }
 function setBanner(html) { if (banner.innerHTML !== html) banner.innerHTML = html; }
-
-const charLayer = document.createElement('canvas');
-const clc = charLayer.getContext('2d');
 
 let last = performance.now();
 function frame(now) {
@@ -974,102 +762,64 @@ function frame(now) {
   last = now;
   const t = now / 1000;
   if (tracker) tracker.update(now);
-  const pose = readPose(dt);
+  const p = tracker?.people?.[0] || null;
+  const person = p ? { lm: p.lm, raw: p.raw } : null;
+  if (tracker && (tracker.running || tracker.fake) && (scan.state === 'waiting' || scan.state === 'spinning')) scanStep(dt, person);
+  if (scan.state === 'done' && model) setBanner(model.title + (mode === 'live' ? ' <small>copies you live</small>' : ' <small>drag to spin</small>'));
+  if (tracker?.running) setStatus(person ? 'active' : 'searching', person ? 'you’re in view' : 'looking for you');
 
-  // scan state machine
-  if (tracker && (tracker.running || tracker.fake)) {
-    if (scan.state === 'waiting') {
-      if (pose) scan.seenT += dt; else scan.seenT = 0;
-      if (pose && fullBody) { scan.fullT = (scan.fullT || 0) + dt; } else scan.fullT = 0;
-      if (scan.fullT > 0.8 || scan.seenT > 9) { scan.state = 'scanning'; scan.t = 0; scan.samples = {}; scan.partial = !fullBody; }
-      setBanner(pose ? (fullBody ? 'Hold it right there' : `Step back so I can see your feet <small>${scan.seenT > 4 ? 'or I’ll scan what I can see in ' + Math.ceil(9 - scan.seenT) + 's' : ''}</small>`) : 'Step into the frame');
-    } else if (scan.state === 'scanning') {
-      const still = motion < 0.35;
-      if (pose && still) {
-        const before = scan.t;
-        scan.t += dt;
-        if (Math.floor(before * 8) !== Math.floor(scan.t * 8)) { sampleFrame(pose.lm); S.tick(scan.t / 3); }
-      }
-      const pct = Math.min(100, Math.round((scan.t / 3) * 100));
-      setBanner(pose ? (still ? `Scanning ${pct}%` : 'Hold still…') : 'Come back into the frame');
-      if (scan.t >= 3) { scan.state = 'done'; finishScan(); }
-    } else if (scan.state === 'done') {
-      setBanner(reveal < 1 ? 'Scan complete' : (look.partial ? `${look.title} <small>legs guessed: step back and rescan for a full scan</small>` : look.title));
+  if (model && model.group.visible) {
+    if (mode === 'live') {
+      poseModel(person?.raw, dt);
+      spinY += (0 - spinY) * ease(dt, 0.3);
+    } else {
+      poseModel(null, dt);
+      spinY += (dragV + 0.5) * dt;
+      dragV *= 1 - Math.min(1, dt * 2);
     }
-    const label = !pose ? 'looking for you' : fullBody ? 'full body in view' : 'upper body in view';
-    setStatus(pose ? 'active' : 'searching', label);
-  }
-
-  ctx.drawImage(backdrop, 0, 0, W, H);
-  // the character, bobbing gently when idle
-  const u = Math.min(H * 0.68 / 8.4, W * 0.09);
-  const cx = W / 2 + A.shift * W * 0.35;
-  const J = buildJoints(cx, H * 0.93, u, look?.build || 1);
-  const breathe = Math.sin(t * 2) * u * 0.03;
-  for (const key in J) if (key !== 'u' && !['aL', 'aR'].includes(key)) J[key].y += breathe * (J[key].y < J.hip.y ? 1 : 0.4);
-  const L = look || { ...DEFAULT_LOOK, skin: [190, 200, 210], hair: [110, 120, 140], shirt: [150, 160, 180], pants: [110, 120, 140], shoes: [200, 205, 215] };
-  if (charLayer.width !== canvas.width || charLayer.height !== canvas.height) { charLayer.width = canvas.width; charLayer.height = canvas.height; }
-  clc.setTransform(1, 0, 0, 1, 0, 0);
-  clc.clearRect(0, 0, charLayer.width, charLayer.height);
-  clc.setTransform(DPR, 0, 0, DPR, 0, 0);
-  const holo = look ? 0 : 0.55 + Math.sin(t * 6) * 0.05;
-  if (look && reveal < 1) {
-    // wipe the finished look in from the top over the hologram
-    reveal = Math.min(1, reveal + dt / 1.1);
-    const cut = lerp(J.head.y - u * 1.2, H, reveal);
-    drawCharacter(clc, J, { ...DEFAULT_LOOK, ...L }, t, 0);
-    clc.save();
-    clc.setTransform(1, 0, 0, 1, 0, 0);
-    clc.globalCompositeOperation = 'destination-out';
-    clc.fillRect(0, cut * DPR, charLayer.width, charLayer.height);
-    clc.restore();
-    ctx.drawImage(charLayer, 0, 0, W, H);
-    clc.setTransform(1, 0, 0, 1, 0, 0);
-    clc.clearRect(0, 0, charLayer.width, charLayer.height);
-    clc.setTransform(DPR, 0, 0, DPR, 0, 0);
-    drawCharacter(clc, J, { ...DEFAULT_LOOK, skin: [190, 200, 210], hair: [110, 120, 140], shirt: [150, 160, 180], pants: [110, 120, 140], shoes: [200, 205, 215] }, t, 0.55);
-    clc.save();
-    clc.setTransform(1, 0, 0, 1, 0, 0);
-    clc.globalCompositeOperation = 'destination-out';
-    clc.fillRect(0, 0, charLayer.width, cut * DPR);
-    clc.restore();
-    ctx.drawImage(charLayer, 0, 0, W, H);
-    // bright scan line at the cut
-    ctx.fillStyle = 'rgba(200, 255, 255, 0.9)';
-    ctx.fillRect(cx - u * 3, cut - 2, u * 6, 4);
-  } else {
-    drawCharacter(clc, J, L, t, holo);
-    ctx.globalAlpha = look ? 1 : 0.85 * clamp01(0.4 + present);
-    ctx.drawImage(charLayer, 0, 0, W, H);
-    ctx.globalAlpha = 1;
-  }
-  drawScanOverlay(pose, t);
+    // grow in from the floor after building
+    model.reveal = Math.min(1, (model.reveal ?? 1) + dt / 0.9);
+    const e = 1 - Math.pow(1 - model.reveal, 3);
+    rig.scale.set(-e, e, e); // mirrored, like the other pages
+    rig.rotation.y = spinY;
+    shadow.visible = true;
+  } else shadow.visible = false;
+  renderer.render(scene, camera);
+  drawScanOverlay(person, t);
 }
 
 resize();
 requestAnimationFrame(frame);
 
+// drag to spin
+let drag = null;
+glCanvas.addEventListener('pointerdown', (e) => { drag = { x: e.clientX }; glCanvas.setPointerCapture(e.pointerId); });
+glCanvas.addEventListener('pointermove', (e) => {
+  if (!drag || !model) return;
+  const dx = e.clientX - drag.x;
+  drag.x = e.clientX;
+  if (mode === 'live') setMode('turntable');
+  spinY += dx * 0.01;
+  dragV = dx * 0.4;
+});
+glCanvas.addEventListener('pointerup', () => { drag = null; });
+
+function setMode(m) {
+  mode = m;
+  $('btn-mode').textContent = mode === 'live' ? 'Turntable' : 'Copy me';
+}
+$('btn-mode').addEventListener('click', () => { S.click(); setMode(mode === 'live' ? 'turntable' : 'live'); });
+$('btn-look').addEventListener('click', (e) => {
+  S.click();
+  const toon = skinMat.uniforms.toon.value > 0.5 ? 0 : 1;
+  skinMat.uniforms.toon.value = toon;
+  outlineMat.uniforms.outline.value = toon ? 0.0045 : 0.0;
+  e.currentTarget.textContent = toon ? 'Photo look' : 'Game look';
+});
+$('btn-glb').addEventListener('click', () => { S.click(); saveGLB(); });
 setupToggle($('btn-mirror'), true, (v) => mirror.classList.toggle('hidden', !v));
 setupToggle($('btn-audio'), true, (v) => sfx.setOn(v));
-$('btn-scan').addEventListener('click', () => {
-  sfx.init();
-  S.click();
-  scan = { state: 'waiting', t: 0, seenT: 0, samples: {} };
-  look = null;
-  showSwatches();
-  ['btn-hair', 'btn-shades', 'btn-poster'].forEach((id) => ($(id).disabled = true));
-});
-$('btn-hair').addEventListener('click', () => {
-  if (!look) return;
-  S.click();
-  look.hairStyle = HAIR_STYLES[(HAIR_STYLES.indexOf(look.hairStyle) + 1) % HAIR_STYLES.length];
-});
-$('btn-shades').addEventListener('click', (e) => {
-  if (!look) return;
-  S.click();
-  look.shades = !look.shades;
-  e.currentTarget.setAttribute('aria-pressed', String(look.shades));
-});
+$('btn-scan').addEventListener('click', () => { sfx.init(); S.click(); setMode('live'); if (tracker) resetScan(); });
 $('btn-poster').addEventListener('click', () => { sfx.init(); openPoster(false); });
 $('poster-again').addEventListener('click', () => openPoster(true));
 $('poster-close').addEventListener('click', () => { $('poster-view').hidden = true; });
@@ -1080,13 +830,14 @@ enterBtn.addEventListener('click', async () => {
   sfx.init();
   note.classList.remove('error');
   try {
-    tracker ||= new PoseTracker(video, { numPoses: 1 });
+    tracker ||= new PoseTracker(video, { numPoses: 1, masks: true });
     const loading = tracker.load();
     await tracker.startCamera();
     await loading;
     landing.classList.add('gone');
     hud.hidden = false;
-    requestAnimationFrame(resize); // size the scanner overlay now that it is visible
+    resetScan();
+    requestAnimationFrame(resize);
   } catch (err) {
     console.error(err);
     tracker?.stopCamera();
@@ -1097,14 +848,16 @@ enterBtn.addEventListener('click', async () => {
   }
 });
 
-// testing hook
+// testing hooks: build from prepared captures without spinning in front of a camera
 window.avatar = {
-  makePose,
-  fake(list) { tracker ||= new PoseTracker(video); tracker.fake = list; },
   get scan() { return scan; },
-  get look() { return look; },
-  setLook(l) { look = { ...DEFAULT_LOOK, title: 'COBALT ACE', seed: 1, ...l }; reveal = 1; showSwatches(); scan.state = 'done'; ['btn-hair', 'btn-shades', 'btn-poster'].forEach((id) => ($(id).disabled = false)); },
-  angles: A,
-  get fullBody() { return fullBody; },
+  get model() { return model; },
+  build: (caps) => { scan = { state: 'spinning', caps }; return build(caps); },
+  capture: () => tracker?.capture(),
+  setMode,
+  poseModel,
   makePoster,
+  glbBlob,
+  skinMat,
+  outlineMat,
 };

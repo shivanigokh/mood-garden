@@ -53,6 +53,9 @@ export class PoseTracker {
   constructor(video, opts = {}) {
     this.video = video;
     this.numPoses = opts.numPoses || 1;
+    this.masks = !!opts.masks; // body segmentation, used by the 3D scan
+    this._captures = new Map();
+    this._capId = 0;
     this.stream = null;
     this.running = false;
     this.ready = false;
@@ -72,7 +75,7 @@ export class PoseTracker {
     }
     const { PoseLandmarker, FilesetResolver } = await import('../vendor/mediapipe/vision_bundle.mjs');
     const fileset = await FilesetResolver.forVisionTasks(WASM_PATH);
-    const opts = (delegate) => ({ baseOptions: { modelAssetPath: POSE_MODEL, delegate }, runningMode: 'VIDEO', numPoses: this.numPoses, minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.5, minTrackingConfidence: 0.5 });
+    const opts = (delegate) => ({ baseOptions: { modelAssetPath: POSE_MODEL, delegate }, runningMode: 'VIDEO', numPoses: this.numPoses, outputSegmentationMasks: this.masks, minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.5, minTrackingConfidence: 0.5 });
     try { this.pose = await PoseLandmarker.createFromOptions(fileset, opts('GPU')); } catch (e) { this.pose = await PoseLandmarker.createFromOptions(fileset, opts('CPU')); }
     this.mode = 'main';
     this.ready = true;
@@ -80,16 +83,20 @@ export class PoseTracker {
 
   _loadWorker() {
     return new Promise((resolve, reject) => {
-      const w = (this.worker = new Worker(new URL('./pose-worker.js?v=8', import.meta.url)));
+      const w = (this.worker = new Worker(new URL('./pose-worker.js?v=9', import.meta.url)));
       const timer = setTimeout(() => reject(new Error('pose worker init timed out')), 45000);
       w.onerror = (e) => { clearTimeout(timer); reject(e.error || new Error(e.message || 'worker error')); };
       w.onmessage = (e) => {
         const d = e.data;
         if (d.type === 'ready') { clearTimeout(timer); resolve(); }
         else if (d.type === 'error') { clearTimeout(timer); reject(new Error(d.message)); }
-        else if (d.type === 'result') { this._pending = d.landmarks || []; this._busy = false; }
+        else if (d.type === 'result') {
+          this._pending = d.landmarks || [];
+          this._busy = false;
+          if (d.capture) { const cb = this._captures.get(d.capture.id); this._captures.delete(d.capture.id); cb?.(d.capture); }
+        }
       };
-      w.postMessage({ type: 'init', wasm: WASM_PATH, model: POSE_MODEL, numPoses: this.numPoses });
+      w.postMessage({ type: 'init', wasm: WASM_PATH, model: POSE_MODEL, numPoses: this.numPoses, masks: this.masks });
     });
   }
 
@@ -125,6 +132,15 @@ export class PoseTracker {
           this._busy = true;
           this._busySince = now;
           const vw = this.video.videoWidth, vh = this.video.videoHeight;
+          const cap = this._wantCapture;
+          this._wantCapture = null;
+          if (cap) {
+            // full resolution for a scan capture so the texture stays sharp
+            createImageBitmap(this.video)
+              .then((bitmap) => this.worker.postMessage({ type: 'frame', bitmap, ts: performance.now(), capture: cap }, [bitmap]))
+              .catch(() => { this._busy = false; const cb = this._captures.get(cap); this._captures.delete(cap); cb?.(null); });
+            return this._finishUpdate(now);
+          }
           const scale = Math.min(1, 640 / Math.max(vw, 1));
           const o = scale < 1 ? { resizeWidth: Math.round(vw * scale), resizeHeight: Math.round(vh * scale), resizeQuality: 'medium' } : undefined;
           (o ? createImageBitmap(this.video, o).catch(() => createImageBitmap(this.video)) : createImageBitmap(this.video))
@@ -134,9 +150,29 @@ export class PoseTracker {
         if (this._pending) { res = this._pending; this._pending = null; }
       } else if (vt !== this.lastVideoTime) {
         this.lastVideoTime = vt;
-        try { res = this.pose.detectForVideo(this.video, now).landmarks; } catch (e) { /* skip */ }
+        try {
+          const r = this.pose.detectForVideo(this.video, now);
+          res = r.landmarks;
+          if (this._wantCapture) {
+            const id = this._wantCapture;
+            this._wantCapture = null;
+            const w = this.video.videoWidth, h = this.video.videoHeight;
+            const cv = document.createElement('canvas');
+            cv.width = w; cv.height = h;
+            const c2 = cv.getContext('2d');
+            c2.drawImage(this.video, 0, 0);
+            const m = r.segmentationMasks?.[0];
+            const cap = { id, w, h, mask: m ? new Float32Array(m.getAsFloat32Array()) : null, rgba: c2.getImageData(0, 0, w, h).data, world: r.worldLandmarks?.[0] || null, lm: r.landmarks?.[0] || null };
+            const cb = this._captures.get(id); this._captures.delete(id); cb?.(cap);
+          }
+          r.segmentationMasks?.forEach((mm) => mm.close());
+        } catch (e) { /* skip */ }
       }
     }
+    return this._finishUpdate(now, res);
+  }
+
+  _finishUpdate(now, res = null) {
     if (!res) {
       // forget people we have not seen for a moment
       this.people = this.people.filter((p) => now - p.seen < 600);
@@ -144,6 +180,17 @@ export class PoseTracker {
     }
     this._match(res, now);
     return true;
+  }
+
+  // Ask for the next camera frame at full resolution with its body mask.
+  // Resolves to { w, h, mask, rgba, world, lm } or null.
+  capture() {
+    const id = ++this._capId;
+    return new Promise((resolve) => {
+      this._captures.set(id, resolve);
+      this._wantCapture = id;
+      setTimeout(() => { if (this._captures.has(id)) { this._captures.delete(id); if (this._wantCapture === id) this._wantCapture = null; resolve(null); } }, 3000);
+    });
   }
 
   // keep identities stable between frames by matching shoulder centres
