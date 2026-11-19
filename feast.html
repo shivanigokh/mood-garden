@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Feast · Mood Garden</title>
+  <meta name="description" content="A face-controlled snack game: move your head to steer and open your mouth to catch falling food. Camera is processed locally." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300&family=Inter:wght@300;400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="feast.css" />
+</head>
+<body class="feast">
+  <nav class="modes" aria-label="Experiences">
+    <a href="./">Garden</a>
+    <a href="feast.html" aria-current="page">Feast</a>
+  </nav>
+
+  <video id="cam" class="feast-video" playsinline muted autoplay></video>
+  <canvas id="game" aria-label="Feast game"></canvas>
+
+  <!-- Landing -->
+  <section id="landing" class="landing">
+    <div class="landing-inner">
+      <h1 class="title">FEAST</h1>
+      <p class="subtitle">Open wide. Dinner is falling.</p>
+      <button id="enter" class="enter">Start the feast</button>
+      <p id="landing-note" class="landing-note">
+        Move your head to put your mouth under the food, then open your mouth to eat it.
+        Dodge the thorny bombs. The camera is processed on this device and nothing is recorded or uploaded.
+      </p>
+    </div>
+  </section>
+
+  <!-- HUD -->
+  <div id="hud" class="hud" hidden>
+    <div class="scoreboard" aria-live="polite">
+      <div class="score"><span id="score">0</span><small>points</small></div>
+      <div class="lives" id="lives" aria-label="Lives"></div>
+      <div class="timer"><span id="timer">60</span><small>seconds</small></div>
+    </div>
+
+    <div id="status" class="status" data-state="loading" role="status">
+      <span class="dot"></span><span class="status-text">starting camera…</span>
+    </div>
+
+    <nav class="controls" aria-label="Game controls">
+      <button id="btn-audio" class="ctl" title="Sound" aria-label="Toggle sound" aria-pressed="true">
+        <svg viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path class="wave" d="M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a7.8 7.8 0 0 1 0 11"/><path class="slash" d="M15.5 9.5l5 5M20.5 9.5l-5 5"/></svg>
+      </button>
+      <button id="btn-pause" class="ctl" title="Pause" aria-label="Pause or resume">
+        <svg viewBox="0 0 24 24"><path class="pause" d="M9 6.5v11M15 6.5v11"/><path class="play" d="M8.5 6l10 6-10 6z"/></svg>
+      </button>
+    </nav>
+
+    <div id="banner" class="banner" hidden></div>
+  </div>
+
+  <!-- Game over -->
+  <section id="over" class="landing gone" aria-live="polite">
+    <div class="landing-inner">
+      <p class="subtitle small">That was delicious.</p>
+      <h2 class="title final"><span id="final-score">0</span></h2>
+      <p id="final-detail" class="landing-note"></p>
+      <button id="again" class="enter">Feast again</button>
+    </div>
+  </section>
+
+  <script type="module" src="js/feast.js"></script>
+</body>
+</html>

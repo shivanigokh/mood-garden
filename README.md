@@ -55,10 +55,24 @@ Controls (top right): show/hide your face view, camera on/off, ambient sound on/
 
 **Tips:** face the camera with even, front lighting. The first second after your face is found is spent learning *your* neutral face; keep it relaxed. If expressions feel off (for example after changing seat or lighting), press **Reset** to re-learn.
 
+## Feast (the food game)
+
+Use the **Garden / Feast** switch at the top of the page to open **Feast**, a second face-controlled experience. Food falls, drifts and gets tossed in from the sides over your mirrored camera view. Move your head to put your mouth under it and **open your mouth** to eat it.
+
+- A ring follows your mouth. It turns gold when your mouth is open, which is when you can catch food.
+- Catch treats quickly one after another to build a combo (up to ×6). 🌟 is worth 50.
+- Food that hits a closed mouth bonks off.
+- Eating a 💣 costs one of your three lives.
+- A round lasts 60 seconds and gets faster as it goes. Your best score is saved in this browser.
+- Press **Space** or **P** to pause. The game also pauses when you switch tabs or step out of frame.
+
+The game runs on the same on-device tracker as the garden, so nothing is uploaded.
+
 ## How it works
 
 ```
-index.html      landing screen, HUD, guide
+index.html      the garden: landing screen, HUD, guide
+feast.html      the food game (feast.css, js/feast.js)
 style.css       visual styling (no frameworks)
 js/main.js      app wiring: camera flow, UI, main loop, events
 js/tracking.js  camera, expression maths, smoothing, gesture detection

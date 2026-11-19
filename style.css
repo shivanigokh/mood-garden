@@ -65,6 +65,40 @@ html, body {
   mix-blend-mode: screen;
 }
 
+/* ---------- Mode switcher ---------- */
+.modes {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(250, 247, 240, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 10px 30px -16px rgba(40, 50, 42, 0.45);
+}
+.modes a {
+  font-family: var(--serif);
+  font-size: 16px;
+  letter-spacing: 0.06em;
+  color: rgba(46, 58, 50, 0.72);
+  text-decoration: none;
+  padding: 6px 18px 7px;
+  border-radius: 999px;
+  transition: background 0.35s, color 0.35s;
+}
+.modes a:hover, .modes a:focus-visible { color: #2a352e; background: rgba(255, 252, 245, 0.55); outline: none; }
+.modes a[aria-current="page"] { background: rgba(255, 252, 245, 0.92); color: #2a352e; box-shadow: 0 2px 10px -4px rgba(40, 50, 42, 0.35); }
+@media (max-width: 560px) {
+  .modes { top: auto; bottom: 16px; left: auto; right: 16px; transform: none; }
+  .modes a { padding: 5px 13px 6px; font-size: 14px; }
+}
+
 /* ---------- Landing ---------- */
 .landing {
   position: fixed;
