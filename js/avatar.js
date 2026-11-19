@@ -14,6 +14,7 @@ import { PoseTracker } from './body.js?v=11';
 import { ScanCover } from './scan-cover.js?v=2';
 import { clamp01, ease, cameraErrorMessage, Sfx, setupToggle } from './shared.js?v=8';
 import * as S3 from './scan3d.js?v=10';
+import * as Fit from './fitbody.js?v=1';
 
 const $ = (id) => document.getElementById(id);
 const video = $('cam');
@@ -195,7 +196,7 @@ let model = null;
 let mode = 'live'; // live | turntable
 let spinY = 0, dragV = 0;
 
-function buildModel(mesh, normals, W8, views, atlasInfo, front) {
+function buildModel(mesh, normals, W8, views, atlasInfo, front, skin = null) {
   if (model) { rig.remove(model.group); model.geo.dispose(); }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
@@ -210,7 +211,7 @@ function buildModel(mesh, normals, W8, views, atlasInfo, front) {
   // rig
   const J = S3.restJoints(front);
   const layout = S3.boneLayout(J);
-  const { si, sw } = S3.skinWeights(mesh, layout);
+  const { si, sw } = skin || S3.skinWeights(mesh, layout);
   geo.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(si, 4));
   geo.setAttribute('skinWeight', new THREE.Float32BufferAttribute(sw, 4));
   const group = new THREE.Group();
@@ -394,28 +395,20 @@ async function build(caps) {
     await step(0.05, 'Lining up the angle of every shot…');
     await S3.alignViews(views, (f) => { bar.style.width = Math.round((0.05 + f * 0.12) * 100) + '%'; });
     const atlasInfo = S3.prepare(views, RES);
-    await step(0.18, 'Carving your shape…');
-    const { occ, c } = await S3.carve(views, RES, (f) => { bar.style.width = Math.round((0.18 + f * 0.42) * 100) + '%'; });
-    await step(0.62, 'Smoothing the surface…');
-    const field = S3.blurField(occ, RES.nx, RES.ny, RES.nz, 2);
-    await step(0.7, 'Building the mesh…');
-    const mesh = S3.surfaceNets(field, RES.nx, RES.ny, RES.nz, c);
-    if (mesh.indices.length < 300) throw new Error('Not enough of you made it into the scan. Stand head to toe in view and turn a little slower.');
-    S3.orient(mesh, field, RES.nx, RES.ny, RES.nz, c);
-    S3.smooth(mesh, 4);
-    const geoTmp = new THREE.BufferGeometry();
-    geoTmp.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
-    geoTmp.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
-    geoTmp.computeVertexNormals();
-    const normals = geoTmp.getAttribute('normal').array;
-    await step(0.8, 'Painting on your real colours…');
-    const Wts = S3.viewWeights(mesh, normals, views, occ, RES, c);
-    await step(0.92, 'Rigging your skeleton…');
-    // the view closest to facing the camera gives the rest pose
+    // the view closest to facing the camera gives your proportions and rest pose
     const withLm = views.filter((v) => v.lm);
     if (!withLm.length) throw new Error('I never got a clear look at your pose. Try again with more light.');
     const front = withLm.reduce((a, b) => (Math.abs(Math.sin(b.theta / 2)) < Math.abs(Math.sin(a.theta / 2)) ? b : a));
-    buildModel(mesh, normals, Wts, views, atlasInfo, front);
+    await step(0.3, 'Measuring you…');
+    const fit = Fit.fitBody(views, front);
+    const mesh = fit.mesh, normals = fit.normals;
+    await step(0.5, 'Shaping your game body…');
+    const ORES = { nx: 100, ny: 104, nz: 100, nu: RES.nu, nv: RES.nv };
+    const { occ, c } = Fit.occupancy(fit.parts, ORES);
+    await step(0.7, 'Painting on your real colours…');
+    const Wts = S3.viewWeights(mesh, normals, views, occ, ORES, c);
+    await step(0.92, 'Rigging your skeleton…');
+    buildModel(mesh, normals, Wts, views, atlasInfo, front, fit.skin);
     Object.assign(model, { atlasInfo, weights: Wts, meshData: mesh, normals, title: makeTitle(front), reveal: 0 });
     await step(1, 'Done');
     scan.state = 'done';

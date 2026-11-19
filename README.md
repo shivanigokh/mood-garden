@@ -138,14 +138,14 @@ No camera? Click to drop food and drag to stir. **Draw a fish** opens a sketch p
 When the turn is done, the page builds the model in your browser:
 
 1. **Line up.** People never turn at exactly the guide's pace, so each shot's angle is corrected first: for every shot, nearby angles are tried on a coarse grid and the one that carves away the least of what the other shots can see wins.
-2. **Shape (visual hull).** A 200³ voxel grid is carved by all 24 silhouettes (a voxel that falls outside the mask in more than two views is removed), small specks are dropped, and the result is smoothed and meshed with surface nets.
+2. **Fitted game body.** Carving a body straight from webcam outlines comes out lumpy, so instead a smooth, game-style body is built and every part is sized to you: head (hair included) from the outline at eye height and the side shots, torso width from the front shot and depth from the side shots, hips or a skirt or dress down to where your outline splits into two legs, each leg following its own outline, and arms and hands placed on your joints.
 3. **Paint.** Every point on the surface is coloured from the camera frames that faced it best and actually saw it (not hidden behind an arm), mostly from the single best shot so it stays sharp, and dark shots are brightened a little. Your face, hair and clothes come from the photos themselves, not a palette.
 4. **Look.** A toon shader (banded light, rim light, ink outline) gives it the game look. **Photo look** switches to plain photo texture.
 5. **Rig.** The mesh gets an 11-bone skeleton placed from your landmarks, and **Copy me** poses it from your live body. **Turntable** spins it, and you can drag to rotate.
 
 **Save 3D** downloads a .glb (vertex-coloured mesh, opens in Blender, Windows 3D Viewer and most game engines). **Make poster** builds a loading-screen style poster with the 3D render you can save as a PNG. All artwork, type treatment and names are original, and nothing leaves your computer.
 
-**What a webcam scan can and can't do.** One webcam and a turn give the body's real outline, proportions and your actual colours and textures, which is enough to read as you. It can't recover fine 3D detail: the nose, eye sockets, fingers and folds come out smooth, with the detail carried by the photo texture instead. The top of the head and under the arms are never seen side-on, so they're filled in. For best results use even light, a plain uncluttered background, clothes that contrast with it, and a slow, steady turn on the spot.
+**What a webcam scan can and can't do.** One webcam and a turn give the body's real outline, proportions and your actual colours and textures, which is enough to read as you. The body shape is a clean game body sized to you rather than an exact sculpt, so the nose, fingers and folds come from the photo texture, not the 3D shape. The top of the head and under the arms are never seen side-on, so they're filled in. For best results use even light, a plain uncluttered background, clothes that contrast with it, and a slow, steady turn on the spot.
 
 ## How it works
 
@@ -158,7 +158,9 @@ pet.html        Pip the mirror pet (pet.css, js/pet.js)
 party.html      motion minigames (party.css, js/party.js)
 tank.html       hand-played aquarium with drawn fish (tank.css, js/tank.js)
 avatar.html     3D spin scan into a game character (avatar.css, js/avatar.js)
-js/scan3d.js    visual hull, meshing, projective texturing, rig and .glb export
+js/scan3d.js    shot measuring and alignment, projective texturing, rig and .glb export
+js/fitbody.js   the fitted game body, sized from your front and side shots
+js/scan-cover.js  the live figure that shows what's scanned and what's still to scan
 js/body.js      full-body tracking (MediaPipe Pose) with one-euro smoothing
 js/pose-worker.js  runs the pose model in a Web Worker
 js/shared.js    small helpers and a creature-sound synth for Shadows and Pet
