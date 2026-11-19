@@ -1,7 +1,7 @@
 // FEAST: steer with your head, open your mouth to eat the falling food.
 // Reuses the Mood Garden face tracker (MediaPipe, on-device, in a worker).
 
-import { Tracker } from './tracking.js';
+import { Tracker } from './tracking.js?v=4';
 
 const $ = (id) => document.getElementById(id);
 const video = $('cam');
@@ -347,13 +347,6 @@ function draw(now) {
   ctx.clearRect(0, 0, W, H);
   ctx.save();
   if (state?.shake) ctx.translate(rr(-1, 1) * 14 * state.shake, rr(-1, 1) * 14 * state.shake);
-
-  // soft pastel wash over the camera so the food pops
-  const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, 'rgba(246,235,222,0.10)');
-  g.addColorStop(1, 'rgba(225,232,214,0.06)');
-  ctx.fillStyle = g;
-  ctx.fillRect(-20, -20, W + 40, H + 40);
 
   if (mouth.seen) drawMouth(now);
 
