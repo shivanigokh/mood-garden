@@ -10,7 +10,7 @@
 // or be put on a poster.
 
 import * as THREE from 'three';
-import { PoseTracker } from './body.js?v=10';
+import { PoseTracker } from './body.js?v=11';
 import { ScanCover } from './scan-cover.js?v=1';
 import { clamp01, ease, cameraErrorMessage, Sfx, setupToggle } from './shared.js?v=8';
 import * as S3 from './scan3d.js?v=9';

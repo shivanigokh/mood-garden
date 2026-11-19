@@ -52,9 +52,14 @@ self.onmessage = async (e) => {
       let mask = null, err = r ? '' : 'pose failed: ' + detErr;
       const m = r?.segmentationMasks?.[0];
       if (m) {
+        // On Macs, MediaPipe's mask read-back checks 'ontouchend' in document, which a
+        // worker doesn't have. Lend it an empty one just for this call.
+        const shim = typeof self.document === 'undefined';
+        if (shim) self.document = {};
         try { mask = new Float32Array(m.getAsFloat32Array()); } catch (e1) {
           try { mask = Float32Array.from(m.getAsUint8Array(), (x) => x / 255); } catch (e2) { err = 'mask read: ' + (e1?.message || e1); }
         }
+        if (shim) delete self.document;
       } else if (r) err = 'no person in this frame';
       msg.capture = { id: d.capture, mw: m?.width || bmp.width, mh: m?.height || bmp.height, mask, err, world: r?.worldLandmarks?.[0] || null, lm: r?.landmarks?.[0] || null };
       if (mask) transfer.push(mask.buffer);

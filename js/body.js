@@ -100,7 +100,7 @@ export class PoseTracker {
 
   _loadWorker() {
     return new Promise((resolve, reject) => {
-      const w = (this.worker = new Worker(new URL('./pose-worker.js?v=10', import.meta.url)));
+      const w = (this.worker = new Worker(new URL('./pose-worker.js?v=11', import.meta.url)));
       const timer = setTimeout(() => reject(new Error('pose worker init timed out')), 45000);
       w.onerror = (e) => { clearTimeout(timer); reject(e.error || new Error(e.message || 'worker error')); };
       w.onmessage = (e) => {
