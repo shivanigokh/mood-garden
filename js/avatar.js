@@ -295,13 +295,19 @@ function resetScan() {
   mirror.classList.remove('hidden');
   ['btn-mode', 'btn-look', 'btn-glb', 'btn-poster'].forEach((id) => ($(id).disabled = true));
   if (model) model.group.visible = false;
+  $('btn-scan').textContent = 'Start turning';
   setTimeout(sizeScanCanvas, 750);
 }
 
 function bodyCheck(lm) {
-  const v = (i) => (lm[i].visibility ?? 1) > 0.55;
-  const inFrame = lm[0].y > 0.04 && Math.max(lm[27].y, lm[28].y, lm[31].y, lm[32].y) < 0.97;
-  return { full: v(0) && v(11) && v(12) && v(23) && v(24) && v(27) && v(28) && inFrame, feetCut: !inFrame };
+  const v = (i, t = 0.5) => (lm[i].visibility ?? 1) > t;
+  const head = v(0) || v(7) || v(8);
+  const core = head && v(11) && v(12) && v(23, 0.4) && v(24, 0.4);
+  const knees = v(25, 0.35) || v(26, 0.35);
+  const feet = (v(27, 0.35) || v(28, 0.35)) && Math.max(lm[27].y, lm[28].y) < 1.0;
+  const headIn = lm[0].y > 0.02;
+  // full: head to toe. ok: head to at least the knees (the feet get filled in)
+  return { full: core && knees && feet && headIn, ok: core && knees && headIn, core, headIn };
 }
 
 // shoulder line from the 3D landmarks gives the turn angle, up to front/back
@@ -323,20 +329,26 @@ function scanStep(dt, person) {
   const lm = person?.raw || null;
   if (scan.state === 'waiting') {
     const chk = lm ? bodyCheck(lm) : null;
-    fullT = chk?.full ? fullT + dt : 0;
-    setBanner(!lm ? 'Step into the frame' : chk.full ? 'Arms a little out from your sides… hold still' : chk.feetCut ? 'Step back: head to toe in view' : 'Step back so I can see all of you');
-    if (fullT > 1.4) { scan.state = 'spinning'; scan.guide = 0; scan.next = 0; S.go(); }
+    fullT = chk?.full ? fullT + dt : chk?.ok ? fullT + dt * 0.5 : 0;
+    setBanner(!lm ? 'Step into the frame so I can see you' :
+      chk.full ? 'Got you head to toe. Arms a little out, hold still…' :
+      chk.ok ? 'Nearly: step back to show your feet, or press Start turning' :
+      !chk.headIn ? 'Your head is cut off: tilt the camera up or step back' :
+      'Step back so I can see you down to your knees');
+    if (fullT > 1.4 || (scan.force && lm)) { scan.force = false; $('btn-scan').textContent = 'Rescan'; scan.state = 'spinning'; scan.guide = 0; scan.next = 0; S.go(); }
   } else if (scan.state === 'spinning') {
-    if (lm) scan.guide = Math.min(TAU, scan.guide + (TAU / SPIN_SECONDS) * dt);
+    const step = TAU / N_VIEWS;
+    // the guide waits for slow captures so the angles stay true
+    if (lm && scan.guide < (scan.next + 1) * step) scan.guide = Math.min(TAU, scan.guide + (TAU / SPIN_SECONDS) * dt);
     const target = (scan.next / N_VIEWS) * TAU;
     if (scan.next < N_VIEWS && scan.guide >= target && !scan.busy && lm) {
       scan.busy = true;
-      const want = scan.next;
+      const want = scan.next, at = scan.guide;
       tracker.capture().then((cap) => {
         scan.busy = false;
         if (scan.state !== 'spinning' || scan.next !== want || !cap || !cap.mask || !cap.rgba || !cap.lm) return;
-        cap.theta = refineYaw(cap.world, target);
-        cap.nominal = target;
+        cap.theta = refineYaw(cap.world, Math.min(at, target + step));
+        cap.nominal = at;
         scan.caps.push(cap);
         scan.next++;
         S.tick(scan.next / N_VIEWS);
@@ -758,13 +770,14 @@ function setBanner(html) { if (banner.innerHTML !== html) banner.innerHTML = htm
 let last = performance.now();
 function frame(now) {
   requestAnimationFrame(frame);
-  const dt = Math.min((now - last) / 1000, 0.05);
+  const rawDt = Math.min((now - last) / 1000, 0.25); // real time, for the scan timers
+  const dt = Math.min(rawDt, 0.05);
   last = now;
   const t = now / 1000;
   if (tracker) tracker.update(now);
   const p = tracker?.people?.[0] || null;
   const person = p ? { lm: p.lm, raw: p.raw } : null;
-  if (tracker && (tracker.running || tracker.fake) && (scan.state === 'waiting' || scan.state === 'spinning')) scanStep(dt, person);
+  if (tracker && (tracker.running || tracker.fake) && (scan.state === 'waiting' || scan.state === 'spinning')) scanStep(rawDt, person);
   if (scan.state === 'done' && model) setBanner(model.title + (mode === 'live' ? ' <small>copies you live</small>' : ' <small>drag to spin</small>'));
   if (tracker?.running) setStatus(person ? 'active' : 'searching', person ? 'you’re in view' : 'looking for you');
 
@@ -819,7 +832,13 @@ $('btn-look').addEventListener('click', (e) => {
 $('btn-glb').addEventListener('click', () => { S.click(); saveGLB(); });
 setupToggle($('btn-mirror'), true, (v) => mirror.classList.toggle('hidden', !v));
 setupToggle($('btn-audio'), true, (v) => sfx.setOn(v));
-$('btn-scan').addEventListener('click', () => { sfx.init(); S.click(); setMode('live'); if (tracker) resetScan(); });
+$('btn-scan').addEventListener('click', () => {
+  sfx.init(); S.click(); setMode('live');
+  if (!tracker) return;
+  // while waiting, the button starts the turn straight away (if it can see you at all)
+  if (scan.state === 'waiting') { scan.force = true; return; }
+  resetScan();
+});
 $('btn-poster').addEventListener('click', () => { sfx.init(); openPoster(false); });
 $('poster-again').addEventListener('click', () => openPoster(true));
 $('poster-close').addEventListener('click', () => { $('poster-view').hidden = true; });
